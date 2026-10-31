@@ -1,0 +1,163 @@
+from ..adapters import system, system_mutations
+from ..utils.response import error_response, ok_response
+from ..utils.validators import require_param, require_positive_int_param
+
+
+def handle(action: str, params: dict, settings) -> dict:
+    if action == "warp_status":
+        title, msg = system.op_network_warp_status_report()
+        return ok_response(title, msg)
+
+    if action == "warp_restart":
+        ok_op, title, msg = system_mutations.op_network_warp_restart()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_warp_restart_failed", title, msg)
+
+    if action == "set_warp_global_mode":
+        ok_m, mode_or_err = require_param(params, "mode", "Network Controls - WARP Global Mode")
+        if not ok_m:
+            return mode_or_err
+        ok_op, title, msg = system_mutations.op_network_warp_set_global_mode(str(mode_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_warp_global_mode_failed", title, msg)
+
+    if action == "warp_tier_status":
+        title, msg = system.op_network_warp_tier_status()
+        return ok_response(title, msg)
+
+    if action == "warp_tier_switch_free":
+        ok_op, title, msg = system_mutations.op_network_warp_tier_switch_free()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_warp_tier_switch_failed", title, msg)
+
+    if action == "warp_tier_switch_plus":
+        license_key = str(params.get("license_key", "")).strip()
+        ok_op, title, msg = system_mutations.op_network_warp_tier_switch_plus(license_key)
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_warp_tier_switch_failed", title, msg)
+
+    if action == "warp_tier_reconnect":
+        ok_op, title, msg = system_mutations.op_network_warp_tier_reconnect()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_warp_tier_reconnect_failed", title, msg)
+
+    if action == "dns_summary":
+        title, msg = system.op_dns_summary()
+        return ok_response(title, msg)
+
+    if action == "set_dns_primary":
+        ok_d, dns_or_err = require_param(params, "dns", "Network Controls - Set Primary DNS")
+        if not ok_d:
+            return dns_or_err
+        ok_op, title, msg = system_mutations.op_network_set_dns_primary(str(dns_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_dns_primary_failed", title, msg)
+
+    if action == "set_dns_secondary":
+        ok_d, dns_or_err = require_param(params, "dns", "Network Controls - Set Secondary DNS")
+        if not ok_d:
+            return dns_or_err
+        ok_op, title, msg = system_mutations.op_network_set_dns_secondary(str(dns_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_dns_secondary_failed", title, msg)
+
+    if action == "set_dns_query_strategy":
+        ok_q, query_or_err = require_param(params, "strategy", "Network Controls - Set DNS Query Strategy")
+        if not ok_q:
+            return query_or_err
+        ok_op, title, msg = system_mutations.op_network_set_dns_query_strategy(str(query_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_dns_query_strategy_failed", title, msg)
+
+    if action == "toggle_dns_cache":
+        ok_op, title, msg = system_mutations.op_network_toggle_dns_cache()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_dns_cache_toggle_failed", title, msg)
+
+    if action == "adblock_status":
+        title, msg = system.op_network_adblock_status()
+        return ok_response(title, msg)
+
+    if action == "adblock_show_bound_users":
+        title, msg = system.op_network_adblock_bound_users()
+        return ok_response(title, msg)
+
+    if action == "adblock_enable":
+        ok_op, title, msg = system_mutations.op_network_adblock_enable()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_enable_failed", title, msg)
+
+    if action == "adblock_disable":
+        ok_op, title, msg = system_mutations.op_network_adblock_disable()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_disable_failed", title, msg)
+
+    if action == "add_adblock_domain":
+        ok_d, domain_or_err = require_param(params, "domain", "Network - Adblock Add Domain")
+        if not ok_d:
+            return domain_or_err
+        ok_op, title, msg = system_mutations.op_network_adblock_add_domain(str(domain_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_add_domain_failed", title, msg)
+
+    if action == "delete_adblock_domain":
+        ok_d, domain_or_err = require_param(params, "domain", "Network - Adblock Delete Domain")
+        if not ok_d:
+            return domain_or_err
+        ok_op, title, msg = system_mutations.op_network_adblock_delete_domain(str(domain_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_delete_domain_failed", title, msg)
+
+    if action == "add_adblock_url_source":
+        ok_u, url_or_err = require_param(params, "url", "Network - Adblock Add URL Source")
+        if not ok_u:
+            return url_or_err
+        ok_op, title, msg = system_mutations.op_network_adblock_add_url_source(str(url_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_add_url_failed", title, msg)
+
+    if action == "delete_adblock_url_source":
+        ok_u, url_or_err = require_param(params, "url", "Network - Adblock Delete URL Source")
+        if not ok_u:
+            return url_or_err
+        ok_op, title, msg = system_mutations.op_network_adblock_delete_url_source(str(url_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_delete_url_failed", title, msg)
+
+    if action == "adblock_update":
+        ok_op, title, msg = system_mutations.op_network_adblock_update()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_update_failed", title, msg)
+
+    if action == "adblock_toggle_auto_update":
+        ok_op, title, msg = system_mutations.op_network_adblock_toggle_auto_update()
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_toggle_auto_update_failed", title, msg)
+
+    if action == "adblock_set_auto_update_days":
+        ok_d, days_or_err = require_positive_int_param(params, "days", "Network - Adblock Set Auto Update Interval", minimum=1)
+        if not ok_d:
+            return days_or_err
+        ok_op, title, msg = system_mutations.op_network_adblock_set_auto_update_days(int(days_or_err))
+        if ok_op:
+            return ok_response(title, msg)
+        return error_response("network_adblock_set_auto_update_days_failed", title, msg)
+
+    return error_response("unknown_action", "Network Controls", f"Action tidak dikenal: {action}")
