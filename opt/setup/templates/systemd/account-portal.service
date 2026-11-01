@@ -1,0 +1,22 @@
+[Unit]
+Description=Autoscript Account Portal
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=__ACCOUNT_PORTAL_ROOT__
+ExecStart=__ACCOUNT_PORTAL_ROOT__/.venv/bin/python -m uvicorn app.main:app --host __ACCOUNT_PORTAL_HOST__ --port __ACCOUNT_PORTAL_PORT__
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
