@@ -25,22 +25,22 @@
 - `Xray`, `SSH/WebSocket`, `BadVPN`, `WARP`
 - `Account Portal`, `Bot Telegram`, `Backup/Restore`, `Domain Guard`, `Uninstall`
 
-## Persiapan Sebelum Install
-
-Versi ini tidak menggunakan aktivasi IP VPS atau License Guard eksternal. Pastikan VPS menggunakan Debian 11+ atau Ubuntu 20.04+, akses root, dan koneksi internet aktif.
-
-Untuk fitur otomatisasi DNS Cloudflare (misalnya DNS-01/wildcard), sediakan token milik Anda sendiri sebelum instalasi: `export CLOUDFLARE_API_TOKEN='TOKEN_ANDA'`. Token akan disimpan di `/etc/autoscript/cloudflare.env` dengan permission `600`; tidak ada token bawaan di source code. Saat setup, sisa service lisensi IP dari versi lama juga akan dinonaktifkan dan dibersihkan.
 
 ## Quick Install
 
 ```bash
-unzip autoscript-no-ip-license-guard.zip
-cd autoscript-main
-RUN_USE_LOCAL_SOURCE=1 bash run.sh
+1. Instalasi langsung (disarankan)
+Pada VPS baru Debian 12, login sebagai root, lalu jalankan:
+apt update && apt install -y curl git && apt install -y curl wget git unzip zip tar rsync sudo jq python3
+bash <(curl -fsSL https://raw.githubusercontent.com/dalagistore/autoscript/main/run.sh)
+
+2. Jika ingin clone repository secara manual
+Gunakan cara ini jika ingin melihat atau mengelola source terlebih dahulu:
+git clone https://github.com/dalagistore/autoscript.git
+cd autoscript
+Kemudian jalankan:
+bash run.sh
 ```
-
-Untuk instalasi dari paket ZIP, ekstrak folder `autoscript-main` lalu jalankan `bash run.sh`. Installer secara default menggunakan source lokal dari folder tersebut. Untuk kembali menggunakan repository remote secara eksplisit, set `RUN_USE_LOCAL_SOURCE=0` sebelum menjalankan installer.
-
 ## Arsitektur Singkat
 
 ```text
