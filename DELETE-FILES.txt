@@ -1,0 +1,7 @@
+opt/manage/core/license.sh
+opt/setup/bin/autoscript-license-check
+opt/setup/core/license.sh
+opt/setup/install/license.sh
+opt/setup/templates/config/autoscript-license.env
+opt/setup/templates/systemd/autoscript-license-enforcer.service
+opt/setup/templates/systemd/autoscript-license-enforcer.timer
