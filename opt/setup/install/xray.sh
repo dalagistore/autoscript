@@ -144,6 +144,63 @@ write_xray_config() {
   declare -gx I_TROJAN_GRPC="$I_TROJAN_GRPC"
 }
 
+xray_is_global_ipv4() {
+  local candidate="${1:-}"
+  [[ -n "${candidate}" ]] || return 1
+  python3 - "${candidate}" <<'PYIP'
+import ipaddress
+import sys
+
+try:
+    address = ipaddress.ip_address(sys.argv[1].strip())
+except ValueError:
+    raise SystemExit(1)
+
+raise SystemExit(0 if address.version == 4 and address.is_global else 1)
+PYIP
+}
+
+xray_detect_public_ipv4() {
+  local candidate="" endpoint="" route_ip=""
+  local supplied="${1:-}"
+  local domain="${2:-}"
+  local -a endpoints=(
+    "https://api.ipify.org"
+    "https://ipv4.icanhazip.com"
+    "https://checkip.amazonaws.com"
+    "https://ifconfig.me/ip"
+    "https://ipinfo.io/ip"
+    "https://4.ident.me"
+  )
+
+  # Prefer the installer-provided VPS_IPV4, but never accept private,
+  # loopback, link-local, multicast, or malformed addresses.
+  if xray_is_global_ipv4 "${supplied}"; then
+    printf '%s\n' "${supplied}" | tr -d '[:space:]'
+    return 0
+  fi
+
+  # Try several independent IPv4 services. A failed provider must not
+  # prevent trying the remaining providers.
+  for endpoint in "${endpoints[@]}"; do
+    candidate="$(curl -4fsS --connect-timeout 3 --max-time 7 "${endpoint}" 2>/dev/null | tr -d '[:space:]' || true)"
+    if xray_is_global_ipv4 "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+
+  # Last local fallback: useful only when the VPS interface itself has
+  # a globally routable IPv4. Private/NAT interface addresses are rejected.
+  route_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1; i<=NF; i++) if ($i=="src") {print $(i+1); exit}}' || true)"
+  if xray_is_global_ipv4 "${route_ip}"; then
+    printf '%s\n' "${route_ip}"
+    return 0
+  fi
+
+  return 1
+}
+
 write_xray_modular_configs() {
   ok "Buat config Xray modular..."
   local template_dir rendered_dir dns_host_ipv4
@@ -152,11 +209,8 @@ write_xray_modular_configs() {
   template_dir="${SETUP_TEMPLATE_SRC_DIR:-${SCRIPT_DIR}/opt/setup/templates}/xray-conf.d"
   [[ -d "${template_dir}" ]] || die "Template modular Xray tidak ditemukan: ${template_dir}"
   rendered_dir="$(mktemp -d)"
-  dns_host_ipv4="${VPS_IPV4:-}"
-  if [[ -z "${dns_host_ipv4}" ]]; then
-    dns_host_ipv4="$(curl -4fsSL --max-time 5 https://api.ipify.org 2>/dev/null || true)"
-  fi
-  [[ -n "${dns_host_ipv4}" ]] || die "Gagal mendeteksi public IPv4 untuk template DNS Xray."
+  dns_host_ipv4="$(xray_detect_public_ipv4 "${VPS_IPV4:-}" "${DOMAIN:-}")"
+  [[ -n "${dns_host_ipv4}" ]] || die "Gagal mendeteksi public IPv4 VPS. Periksa koneksi IPv4 keluar, DNS, atau isi VPS_IPV4."
 
   render_setup_template_or_die "xray-conf.d/00-log.json" "${rendered_dir}/00-log.json" 0644
   render_setup_template_or_die "xray-conf.d/01-api.json" "${rendered_dir}/01-api.json" 0644
