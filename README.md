@@ -39,7 +39,7 @@ cd autoscript-main
 RUN_USE_LOCAL_SOURCE=1 bash run.sh
 ```
 
-Untuk instalasi melalui GitHub, unggah isi folder `autoscript-main` ke repositori Anda sendiri, lalu jalankan `run.sh` dari repositori tersebut. Pastikan URL raw mengarah ke repositori versi tanpa IP License Guard.
+Untuk instalasi dari paket ZIP, ekstrak folder `autoscript-main` lalu jalankan `bash run.sh`. Installer secara default menggunakan source lokal dari folder tersebut. Untuk kembali menggunakan repository remote secara eksplisit, set `RUN_USE_LOCAL_SOURCE=0` sebelum menjalankan installer.
 
 ## Arsitektur Singkat
 
