@@ -206,7 +206,7 @@ cf_api() {
   local endpoint="$2"
   local data="${3:-}"
 
-  [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || die "CLOUDFLARE_API_TOKEN belum di-set. Export CLOUDFLARE_API_TOKEN sebelum menjalankan run.sh/setup.sh."
+  [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || die "CLOUDFLARE_API_TOKEN belum di-set. Isi token Cloudflare di setup.sh atau export env CLOUDFLARE_API_TOKEN."
 
   local url="https://api.cloudflare.com/client/v4${endpoint}"
   local resp code body trimmed header_file=""
@@ -771,79 +771,122 @@ domain_menu_v2() {
   ok "Mode cert: dns_cf wildcard"
 }
 
+acme_existing_cert_usable() {
+  local cert="${CERT_FULLCHAIN:-}"
+  local key="${CERT_PRIVKEY:-}"
+  local domain="${DOMAIN:-}"
+  local cert_pub=""
+  local key_pub=""
+
+  [[ -n "${cert}" && -s "${cert}" ]] || return 1
+  [[ -n "${key}" && -s "${key}" ]] || return 1
+  [[ -n "${domain}" ]] || return 1
+  command -v openssl >/dev/null 2>&1 || return 1
+
+  # Sertifikat harus masih valid setidaknya 24 jam dan cocok dengan domain.
+  openssl x509 -in "${cert}" -noout -checkend 86400 >/dev/null 2>&1 || return 1
+  openssl x509 -in "${cert}" -noout -checkhost "${domain}" >/dev/null 2>&1 || return 1
+
+  # Pastikan private key benar-benar pasangan dari sertifikat.
+  cert_pub="$(
+    openssl x509 -in "${cert}" -pubkey -noout 2>/dev/null |
+      openssl pkey -pubin -outform DER 2>/dev/null |
+      sha256sum | awk '{print $1}'
+  )"
+  key_pub="$(
+    openssl pkey -in "${key}" -pubout -outform DER 2>/dev/null |
+      sha256sum | awk '{print $1}'
+  )"
+
+  [[ -n "${cert_pub}" && -n "${key_pub}" && "${cert_pub}" == "${key_pub}" ]]
+}
+
 install_acme_and_issue_cert() {
   local email=""
-  if [[ "${ACME_CERT_MODE}" != "dns_cf_wildcard" ]]; then
-    snapshot_conflicting_services_active
-    _ACME_RESTORE_NEEDED=1
-    stop_conflicting_services
-    acme_stop_additional_conflicting_services
-  else
-    _ACME_RESTORE_SERVICES=()
-    _ACME_RESTORE_NEEDED=0
-  fi
-  mkdir -p "$CERT_DIR"
+  local reuse_existing_cert=0
 
-  if [[ -x /root/.acme.sh/acme.sh ]]; then
-    ok "acme.sh sudah ada."
-  else
-    ok "Pasang acme.sh..."
-    email="$(rand_email)"
-    ok "Email ACME: ${email}"
-    local acme_tarball acme_tmpdir acme_dns_hook
-    acme_tarball="$(mktemp)"
-    acme_tmpdir="$(mktemp -d)"
-    acme_dns_hook="$(mktemp)"
-    download_file_or_die "${ACME_SH_TARBALL_URL}" "${acme_tarball}" "" "acme.sh tarball"
-    download_file_or_die "${ACME_SH_DNS_CF_HOOK_URL}" "${acme_dns_hook}" "" "acme.sh dns_cf hook"
-    tar -xzf "${acme_tarball}" -C "${acme_tmpdir}" --strip-components=1 || die "Gagal ekstrak acme.sh tarball."
-    [[ -f "${acme_tmpdir}/acme.sh" ]] || die "Tarball acme.sh tidak berisi entry acme.sh."
-    install -m 644 "${acme_dns_hook}" "${acme_tmpdir}/dnsapi/dns_cf.sh"
-    chmod +x "${acme_tmpdir}/acme.sh"
-    export HOME=/root
-    (
-      cd "${acme_tmpdir}" || exit 1
-      sh ./acme.sh --install --home /root/.acme.sh --accountemail "${email}"
-    ) >/dev/null || {
+  mkdir -p "${CERT_DIR}"
+
+  # Hindari meminta sertifikat baru jika sertifikat yang terpasang masih valid.
+  # Ini juga mencegah kegagalan Let's Encrypt HTTP-01 rate limit saat setup ulang.
+  if acme_existing_cert_usable; then
+    ok "Sertifikat existing untuk ${DOMAIN} masih valid dan private key cocok."
+    ok "Gunakan sertifikat yang sudah ada; lewati penerbitan ACME baru."
+    reuse_existing_cert=1
+  fi
+
+  if [[ "${reuse_existing_cert}" != "1" ]]; then
+    if [[ "${ACME_CERT_MODE}" != "dns_cf_wildcard" ]]; then
+      snapshot_conflicting_services_active
+      _ACME_RESTORE_NEEDED=1
+      stop_conflicting_services
+      acme_stop_additional_conflicting_services
+    else
+      _ACME_RESTORE_SERVICES=()
+      _ACME_RESTORE_NEEDED=0
+    fi
+
+    if [[ -x /root/.acme.sh/acme.sh ]]; then
+      ok "acme.sh sudah ada."
+    else
+      ok "Pasang acme.sh..."
+      email="$(rand_email)"
+      ok "Email ACME: ${email}"
+      local acme_tarball acme_tmpdir acme_dns_hook
+      acme_tarball="$(mktemp)"
+      acme_tmpdir="$(mktemp -d)"
+      acme_dns_hook="$(mktemp)"
+      download_file_or_die "${ACME_SH_TARBALL_URL}" "${acme_tarball}" "" "acme.sh tarball"
+      download_file_or_die "${ACME_SH_DNS_CF_HOOK_URL}" "${acme_dns_hook}" "" "acme.sh dns_cf hook"
+      tar -xzf "${acme_tarball}" -C "${acme_tmpdir}" --strip-components=1 || die "Gagal ekstrak acme.sh tarball."
+      [[ -f "${acme_tmpdir}/acme.sh" ]] || die "Tarball acme.sh tidak berisi entry acme.sh."
+      install -m 644 "${acme_dns_hook}" "${acme_tmpdir}/dnsapi/dns_cf.sh"
+      chmod +x "${acme_tmpdir}/acme.sh"
+      export HOME=/root
+      (
+        cd "${acme_tmpdir}" || exit 1
+        sh ./acme.sh --install --home /root/.acme.sh --accountemail "${email}"
+      ) >/dev/null || {
+        rm -f "${acme_tarball}" "${acme_dns_hook}" >/dev/null 2>&1 || true
+        rm -rf "${acme_tmpdir}" >/dev/null 2>&1 || true
+        die "Gagal install acme.sh"
+      }
       rm -f "${acme_tarball}" "${acme_dns_hook}" >/dev/null 2>&1 || true
       rm -rf "${acme_tmpdir}" >/dev/null 2>&1 || true
-      die "Gagal install acme.sh"
-    }
-    rm -f "${acme_tarball}" "${acme_dns_hook}" >/dev/null 2>&1 || true
-    rm -rf "${acme_tmpdir}" >/dev/null 2>&1 || true
-  fi
+    fi
 
-  export PATH="/root/.acme.sh:$PATH"
-  /root/.acme.sh/acme.sh --set-default-ca --server "${ACME_DEFAULT_CA}" >/dev/null 2>&1 || true
+    export PATH="/root/.acme.sh:$PATH"
+    /root/.acme.sh/acme.sh --set-default-ca --server "${ACME_DEFAULT_CA}" >/dev/null 2>&1 || true
 
-  if [[ "${ACME_CERT_MODE}" == "dns_cf_wildcard" ]]; then
-    ok "Issue wildcard cert via dns_cf..."
-    [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || die "CLOUDFLARE_API_TOKEN kosong."
-    [[ -n "${CF_ZONE_ID:-}" ]] || die "CF_ZONE_ID kosong untuk mode dns_cf_wildcard."
+    if [[ "${ACME_CERT_MODE}" == "dns_cf_wildcard" ]]; then
+      ok "Issue wildcard cert via dns_cf..."
+      [[ -n "${CLOUDFLARE_API_TOKEN:-}" ]] || die "CLOUDFLARE_API_TOKEN kosong."
+      [[ -n "${CF_ZONE_ID:-}" ]] || die "CF_ZONE_ID kosong untuk mode dns_cf_wildcard."
 
-    export CF_Token="${CLOUDFLARE_API_TOKEN}"
-    [[ -n "${CF_ACCOUNT_ID:-}" ]] && export CF_Account_ID="${CF_ACCOUNT_ID}"
-    [[ -n "${CF_ZONE_ID:-}" ]] && export CF_Zone_ID="${CF_ZONE_ID}"
+      export CF_Token="${CLOUDFLARE_API_TOKEN}"
+      [[ -n "${CF_ACCOUNT_ID:-}" ]] && export CF_Account_ID="${CF_ACCOUNT_ID}"
+      [[ -n "${CF_ZONE_ID:-}" ]] && export CF_Zone_ID="${CF_ZONE_ID}"
 
-    /root/.acme.sh/acme.sh --issue --force --dns dns_cf \
-      -d "${DOMAIN}" -d "*.${DOMAIN}" \
-      || die "Gagal issue sertifikat wildcard via dns_cf (pastikan token Cloudflare valid)."
+      /root/.acme.sh/acme.sh --issue --force --dns dns_cf \
+        -d "${DOMAIN}" -d "*.${DOMAIN}" \
+        || die "Gagal issue sertifikat wildcard via dns_cf (pastikan token Cloudflare valid)."
 
-    /root/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" \
-      --key-file "${CERT_PRIVKEY}" \
-      --fullchain-file "${CERT_FULLCHAIN}" \
-      --reloadcmd "/bin/true" >/dev/null \
-      || die "Gagal install sertifikat wildcard ke ${CERT_DIR}."
-  else
-    ok "Issue cert via standalone :80..."
-    /root/.acme.sh/acme.sh --issue --force --standalone -d "${DOMAIN}" --httpport 80 \
-      || die "Gagal issue sertifikat (pastikan port 80 terbuka & DNS domain mengarah ke VPS)."
+      /root/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" \
+        --key-file "${CERT_PRIVKEY}" \
+        --fullchain-file "${CERT_FULLCHAIN}" \
+        --reloadcmd "/bin/true" >/dev/null \
+        || die "Gagal install sertifikat wildcard ke ${CERT_DIR}."
+    else
+      ok "Issue cert via standalone :80..."
+      /root/.acme.sh/acme.sh --issue --force --standalone -d "${DOMAIN}" --httpport 80 \
+        || die "Gagal issue sertifikat (pastikan port 80 terbuka & DNS domain mengarah ke VPS)."
 
-    /root/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" \
-      --key-file "${CERT_PRIVKEY}" \
-      --fullchain-file "${CERT_FULLCHAIN}" \
-      --reloadcmd "/bin/true" >/dev/null \
-      || die "Gagal install sertifikat ke ${CERT_DIR}."
+      /root/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" \
+        --key-file "${CERT_PRIVKEY}" \
+        --fullchain-file "${CERT_FULLCHAIN}" \
+        --reloadcmd "/bin/true" >/dev/null \
+        || die "Gagal install sertifikat ke ${CERT_DIR}."
+    fi
   fi
 
   nginx -t >/dev/null 2>&1 || die "Konfigurasi nginx tidak valid setelah install-cert."
@@ -852,7 +895,7 @@ install_acme_and_issue_cert() {
   acme_restore_conflicting_services_after_success
 
   chmod 600 "${CERT_PRIVKEY}" "${CERT_FULLCHAIN}"
-  if [[ "${ACME_CERT_MODE}" == "dns_cf_wildcard" ]]; then
+  if [[ "${ACME_CERT_MODE}" == "dns_cf_wildcard" && "${reuse_existing_cert}" != "1" ]]; then
     setup_cf_dns_rollback_mark_committed
   fi
 
