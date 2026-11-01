@@ -1,1 +1,0 @@
-"""xray telegram gateway package."""
