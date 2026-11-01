@@ -1,0 +1,781 @@
+#!/usr/bin/env bash
+# Xray install/config module for setup runtime.
+
+install_xray() {
+  ok "Pasang Xray..."
+  local xray_installer
+  local xray_installer_err
+  xray_installer="$(mktemp)"
+  xray_installer_err="$(mktemp)"
+  download_file_or_die "${XRAY_INSTALL_SCRIPT_URL}" "${xray_installer}" "" "xray installer script"
+  chmod 700 "${xray_installer}"
+  if ! bash "${xray_installer}" install >/dev/null 2>"${xray_installer_err}"; then
+    cat "${xray_installer_err}" >&2 || true
+    rm -f "${xray_installer}" "${xray_installer_err}" >/dev/null 2>&1 || true
+    die "Gagal install Xray dari ref ${XRAY_INSTALL_REF}."
+  fi
+  rm -f "${xray_installer}" >/dev/null 2>&1 || true
+  rm -f "${xray_installer_err}" >/dev/null 2>&1 || true
+
+  command -v xray >/dev/null 2>&1 || die "Xray tidak terpasang."
+  ok "Xray siap."
+}
+
+write_xray_config() {
+  local UUID TROJAN_PASS
+  UUID="$(cat /proc/sys/kernel/random/uuid)"
+  TROJAN_PASS="$(rand_str 24)"
+
+  local P_VLESS_TCP P_VMESS_TCP P_TROJAN_TCP
+  local P_VLESS_WS P_VMESS_WS P_TROJAN_WS
+  local P_VLESS_HUP P_VMESS_HUP P_TROJAN_HUP
+  local P_VLESS_XHTTP P_VMESS_XHTTP P_TROJAN_XHTTP
+  local P_VLESS_GRPC P_VMESS_GRPC P_TROJAN_GRPC
+  local P_API
+
+  P_VLESS_TCP="$(pick_port)"
+  P_VMESS_TCP="$(pick_port)"
+  P_TROJAN_TCP="$(pick_port)"
+  P_VLESS_WS="$(pick_port)"
+  P_VMESS_WS="$(pick_port)"
+  P_TROJAN_WS="$(pick_port)"
+  P_VLESS_HUP="$(pick_port)"
+  P_VMESS_HUP="$(pick_port)"
+  P_TROJAN_HUP="$(pick_port)"
+  P_VLESS_XHTTP="$(pick_port)"
+  P_VMESS_XHTTP="$(pick_port)"
+  P_TROJAN_XHTTP="$(pick_port)"
+  P_VLESS_GRPC="$(pick_port)"
+  P_VMESS_GRPC="$(pick_port)"
+  P_TROJAN_GRPC="$(pick_port)"
+  P_API="10080"
+  if ! is_port_free "$P_API"; then
+    warn "Port API Xray (${P_API}) sedang dipakai. Mencoba stop service xray sebelumnya..."
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl stop xray >/dev/null 2>&1 || true
+      sleep 1
+    fi
+  fi
+  is_port_free "$P_API" || die "Port API Xray ($P_API) sedang dipakai. Bebaskan port ini atau ubah konfigurasi."
+
+  local I_VLESS_WS I_VMESS_WS I_TROJAN_WS
+  local I_VLESS_HUP I_VMESS_HUP I_TROJAN_HUP
+  local I_VLESS_XHTTP I_VLESS_XHTTP3 I_VMESS_XHTTP I_TROJAN_XHTTP
+  local I_VLESS_GRPC I_VMESS_GRPC I_TROJAN_GRPC
+
+  I_VLESS_WS="/$(rand_str 14)"
+  I_VMESS_WS="/$(rand_str 14)"
+  I_TROJAN_WS="/$(rand_str 14)"
+  I_VLESS_HUP="/$(rand_str 14)"
+  I_VMESS_HUP="/$(rand_str 14)"
+  I_TROJAN_HUP="/$(rand_str 14)"
+  I_VLESS_XHTTP="/vless-xhttp"
+  I_VLESS_XHTTP3="/vless-xhttp3"
+  I_VMESS_XHTTP="/vmess-xhttp"
+  I_TROJAN_XHTTP="/trojan-xhttp"
+  I_VLESS_GRPC="$(rand_str 12)"
+  I_VMESS_GRPC="$(rand_str 12)"
+  I_TROJAN_GRPC="$(rand_str 12)"
+  local XHTTP3_SALAMANDER XHTTP3_ECH_OUTPUT XHTTP3_ECH_CONFIG XHTTP3_ECH_SERVER_KEYS
+  XHTTP3_SALAMANDER="${XRAY_XHTTP3_SALAMANDER_PASSWORD:-}"
+  if [[ -z "${XHTTP3_SALAMANDER}" ]]; then
+    XHTTP3_SALAMANDER="$(rand_str 16)"
+  fi
+  XHTTP3_ECH_OUTPUT="$(xray tls ech --serverName "${DOMAIN}" 2>/dev/null || true)"
+  XHTTP3_ECH_CONFIG="$(printf '%s\n' "${XHTTP3_ECH_OUTPUT}" | awk 'found && NF {print; exit} /^ECH config list:/ {found=1}')"
+  XHTTP3_ECH_SERVER_KEYS="$(printf '%s\n' "${XHTTP3_ECH_OUTPUT}" | awk 'found && NF {print; exit} /^ECH server keys:/ {found=1}')"
+  [[ -n "${XHTTP3_ECH_CONFIG}" && -n "${XHTTP3_ECH_SERVER_KEYS}" ]] || die "Gagal generate ECH config untuk XHTTP/3."
+
+  mkdir -p /var/log/xray
+  touch /var/log/xray/access.log /var/log/xray/error.log
+
+  local xr_user xr_group
+  xr_user="$(systemctl show -p User --value xray 2>/dev/null || true)"
+  if [[ -z "${xr_user:-}" || "$xr_user" == "n/a" ]]; then
+    xr_user="root"
+  fi
+  xr_group="$(id -gn "$xr_user" 2>/dev/null || echo "$xr_user")"
+
+  chown "$xr_user:$xr_group" /var/log/xray >/dev/null 2>&1 || true
+  chown "$xr_user:$xr_group" /var/log/xray/access.log /var/log/xray/error.log >/dev/null 2>&1 || true
+
+  chmod 750 /var/log/xray
+  chmod 640 /var/log/xray/access.log /var/log/xray/error.log
+
+  # Tidak perlu enable/restart xray di sini.
+  # configure_xray_service_confdir (dipanggil setelah write_xray_modular_configs)
+  # akan meng-install unit file yang benar (-confdir) dan merestart xray satu kali.
+  ok "Bootstrap nilai dinamis Xray siap."
+  declare -gx XR_UUID="$UUID"
+  declare -gx XR_TROJAN_PASS="$TROJAN_PASS"
+  declare -gx XR_API_PORT="$P_API"
+  declare -gx XRAY_XHTTP3_SALAMANDER_PASSWORD="$XHTTP3_SALAMANDER"
+  declare -gx XRAY_XHTTP3_ECH_CONFIG="$XHTTP3_ECH_CONFIG"
+  declare -gx XRAY_XHTTP3_ECH_SERVER_KEYS="$XHTTP3_ECH_SERVER_KEYS"
+
+  declare -gx P_VLESS_TCP="$P_VLESS_TCP"
+  declare -gx P_VMESS_TCP="$P_VMESS_TCP"
+  declare -gx P_TROJAN_TCP="$P_TROJAN_TCP"
+  declare -gx P_VLESS_WS="$P_VLESS_WS"
+  declare -gx P_VMESS_WS="$P_VMESS_WS"
+  declare -gx P_TROJAN_WS="$P_TROJAN_WS"
+  declare -gx P_VLESS_HUP="$P_VLESS_HUP"
+  declare -gx P_VMESS_HUP="$P_VMESS_HUP"
+  declare -gx P_TROJAN_HUP="$P_TROJAN_HUP"
+  declare -gx P_VLESS_XHTTP="$P_VLESS_XHTTP"
+  declare -gx P_VMESS_XHTTP="$P_VMESS_XHTTP"
+  declare -gx P_TROJAN_XHTTP="$P_TROJAN_XHTTP"
+  declare -gx P_VLESS_GRPC="$P_VLESS_GRPC"
+  declare -gx P_VMESS_GRPC="$P_VMESS_GRPC"
+  declare -gx P_TROJAN_GRPC="$P_TROJAN_GRPC"
+
+  declare -gx I_VLESS_WS="$I_VLESS_WS"
+  declare -gx I_VMESS_WS="$I_VMESS_WS"
+  declare -gx I_TROJAN_WS="$I_TROJAN_WS"
+  declare -gx I_VLESS_HUP="$I_VLESS_HUP"
+  declare -gx I_VMESS_HUP="$I_VMESS_HUP"
+  declare -gx I_TROJAN_HUP="$I_TROJAN_HUP"
+  declare -gx I_VLESS_XHTTP="$I_VLESS_XHTTP"
+  declare -gx I_VLESS_XHTTP3="$I_VLESS_XHTTP3"
+  declare -gx I_VMESS_XHTTP="$I_VMESS_XHTTP"
+  declare -gx I_TROJAN_XHTTP="$I_TROJAN_XHTTP"
+  declare -gx I_VLESS_GRPC="$I_VLESS_GRPC"
+  declare -gx I_VMESS_GRPC="$I_VMESS_GRPC"
+  declare -gx I_TROJAN_GRPC="$I_TROJAN_GRPC"
+}
+
+write_xray_modular_configs() {
+  ok "Buat config Xray modular..."
+  local template_dir rendered_dir dns_host_ipv4
+  mkdir -p "${XRAY_CONFDIR}"
+  need_python3
+  template_dir="${SETUP_TEMPLATE_SRC_DIR:-${SCRIPT_DIR}/opt/setup/templates}/xray-conf.d"
+  [[ -d "${template_dir}" ]] || die "Template modular Xray tidak ditemukan: ${template_dir}"
+  rendered_dir="$(mktemp -d)"
+  dns_host_ipv4="${VPS_IPV4:-}"
+  if [[ -z "${dns_host_ipv4}" ]]; then
+    dns_host_ipv4="$(curl -4fsSL --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+  fi
+  [[ -n "${dns_host_ipv4}" ]] || die "Gagal mendeteksi public IPv4 untuk template DNS Xray."
+
+  render_setup_template_or_die "xray-conf.d/00-log.json" "${rendered_dir}/00-log.json" 0644
+  render_setup_template_or_die "xray-conf.d/01-api.json" "${rendered_dir}/01-api.json" 0644
+  render_setup_template_or_die \
+    "xray-conf.d/02-dns.json" \
+    "${rendered_dir}/02-dns.json" \
+    0644 \
+    "DOMAIN=${DOMAIN}" \
+    "VPS_IPV4=${dns_host_ipv4}"
+  render_setup_template_or_die \
+    "xray-conf.d/10-inbounds.json" \
+    "${rendered_dir}/10-inbounds.json" \
+    0644 \
+    "UUID=${XR_UUID}" \
+    "TROJAN_PASS=${XR_TROJAN_PASS}" \
+    "P_API=${XR_API_PORT}" \
+    "P_XRAY_WARP_REDIR=${XRAY_WARP_REDIR_PORT}" \
+    "P_XRAY_WARP_REDIR6=${XRAY_WARP_REDIR_PORT_V6}" \
+    "P_VLESS_TCP=${P_VLESS_TCP}" \
+    "P_VMESS_TCP=${P_VMESS_TCP}" \
+    "P_TROJAN_TCP=${P_TROJAN_TCP}" \
+    "P_VLESS_WS=${P_VLESS_WS}" \
+    "P_VMESS_WS=${P_VMESS_WS}" \
+    "P_TROJAN_WS=${P_TROJAN_WS}" \
+    "P_VLESS_HUP=${P_VLESS_HUP}" \
+    "P_VMESS_HUP=${P_VMESS_HUP}" \
+    "P_TROJAN_HUP=${P_TROJAN_HUP}" \
+    "P_VLESS_XHTTP=${P_VLESS_XHTTP}" \
+    "P_VMESS_XHTTP=${P_VMESS_XHTTP}" \
+    "P_TROJAN_XHTTP=${P_TROJAN_XHTTP}" \
+    "P_VLESS_GRPC=${P_VLESS_GRPC}" \
+    "P_VMESS_GRPC=${P_VMESS_GRPC}" \
+    "P_TROJAN_GRPC=${P_TROJAN_GRPC}" \
+    "I_VLESS_WS=${I_VLESS_WS}" \
+    "I_VMESS_WS=${I_VMESS_WS}" \
+    "I_TROJAN_WS=${I_TROJAN_WS}" \
+    "I_VLESS_HUP=${I_VLESS_HUP}" \
+    "I_VMESS_HUP=${I_VMESS_HUP}" \
+    "I_TROJAN_HUP=${I_TROJAN_HUP}" \
+    "I_VLESS_XHTTP=${I_VLESS_XHTTP}" \
+    "I_VLESS_XHTTP3=${I_VLESS_XHTTP3}" \
+    "I_VMESS_XHTTP=${I_VMESS_XHTTP}" \
+    "I_TROJAN_XHTTP=${I_TROJAN_XHTTP}" \
+    "I_VLESS_GRPC=${I_VLESS_GRPC}" \
+    "I_VMESS_GRPC=${I_VMESS_GRPC}" \
+    "I_TROJAN_GRPC=${I_TROJAN_GRPC}" \
+    "DOMAIN=${DOMAIN}" \
+    "XHTTP3_ECH_SERVER_KEYS=${XRAY_XHTTP3_ECH_SERVER_KEYS}" \
+    "XHTTP3_SALAMANDER=${XRAY_XHTTP3_SALAMANDER_PASSWORD}" \
+    "CERT_FULLCHAIN=${CERT_FULLCHAIN}" \
+    "CERT_PRIVKEY=${CERT_PRIVKEY}" \
+    "XRAY_XHTTP3_USER_AGENT=${XRAY_XHTTP3_USER_AGENT}" \
+    "XRAY_XHTTP3_CONGESTION=${XRAY_XHTTP3_CONGESTION}" \
+    "XRAY_XHTTP3_UDPHOP_PORTS=${XRAY_XHTTP3_UDPHOP_PORTS}" \
+    "XRAY_XHTTP3_UDPHOP_INTERVAL=${XRAY_XHTTP3_UDPHOP_INTERVAL}" \
+    "XRAY_XHTTP3_MAX_IDLE_TIMEOUT=${XRAY_XHTTP3_MAX_IDLE_TIMEOUT}" \
+    "XRAY_XHTTP3_KEEPALIVE_PERIOD=${XRAY_XHTTP3_KEEPALIVE_PERIOD}" \
+    "XRAY_XHTTP3_DISABLE_PMTUD=${XRAY_XHTTP3_DISABLE_PMTUD}"
+  render_setup_template_or_die \
+    "xray-conf.d/20-outbounds.json" \
+    "${rendered_dir}/20-outbounds.json" \
+    0644 \
+    "WARP_PROXY_PORT=${WARP_ZEROTRUST_PROXY_PORT}"
+  render_setup_template_or_die "xray-conf.d/30-routing.json" "${rendered_dir}/30-routing.json" 0644
+  render_setup_template_or_die "xray-conf.d/40-policy.json" "${rendered_dir}/40-policy.json" 0644
+  render_setup_template_or_die "xray-conf.d/50-stats.json" "${rendered_dir}/50-stats.json" 0644
+  render_setup_template_or_die "xray-conf.d/60-metrics.json" "${rendered_dir}/60-metrics.json" 0644
+
+  python3 - <<'PY' "${rendered_dir}" "${XRAY_CONFDIR}"
+import json
+import os
+import re
+import sys
+import copy
+
+srcdir, outdir = sys.argv[1:3]
+speed_outbound_prefix = "speed-mark-"
+speed_rule_marker_prefix = "dummy-speed-user-"
+managed_routing_markers = {
+  "dummy-block-user",
+  "dummy-quota-user",
+  "dummy-limit-user",
+  "dummy-warp-user",
+  "dummy-direct-user",
+}
+managed_routing_inbound_markers = {
+  "dummy-warp-inbounds",
+  "dummy-direct-inbounds",
+}
+
+COMMENT_RE = re.compile(r"//.*?$|/\*.*?\*/", re.M | re.S)
+
+def load_json_if_exists(path, fallback):
+  try:
+    with open(path, "r", encoding="utf-8") as f:
+      raw = f.read()
+    return json.loads(COMMENT_RE.sub("", raw))
+  except Exception:
+    return fallback
+
+def load_leading_comment_lines(path):
+  try:
+    with open(path, "r", encoding="utf-8") as f:
+      lines = f.read().splitlines()
+  except Exception:
+    return []
+  comments = []
+  for line in lines:
+    stripped = line.lstrip()
+    if not stripped:
+      if comments:
+        break
+      continue
+    if not stripped.startswith("//"):
+      break
+    comments.append(line)
+  return comments
+
+def client_email(client):
+  if not isinstance(client, dict):
+    return ""
+  return str(client.get("email") or "").strip()
+
+def is_managed_client(client):
+  email = client_email(client)
+  return bool(email) and not email.startswith("default@")
+
+def preserve_clients_by_proto(cfg):
+  preserved = {"vless": {}, "vmess": {}, "trojan": {}}
+  for inbound in cfg.get("inbounds") or []:
+    if not isinstance(inbound, dict):
+      continue
+    proto = str(inbound.get("protocol") or "").strip().lower()
+    if proto not in preserved:
+      continue
+    settings = inbound.get("settings") or {}
+    clients = settings.get("clients")
+    if not isinstance(clients, list):
+      continue
+    for client in clients:
+      if not is_managed_client(client):
+        continue
+      email = client_email(client)
+      preserved[proto].setdefault(email, client)
+  return {proto: list(items.values()) for proto, items in preserved.items()}
+
+def merge_clients_into_inbounds(inbounds, preserved_clients):
+  for inbound in inbounds:
+    if not isinstance(inbound, dict):
+      continue
+    proto = str(inbound.get("protocol") or "").strip().lower()
+    proto_clients = preserved_clients.get(proto) or []
+    if not proto_clients:
+      continue
+    settings = inbound.get("settings") or {}
+    clients = settings.get("clients")
+    if not isinstance(clients, list):
+      continue
+    seen = {client_email(client) for client in clients if client_email(client)}
+    for client in proto_clients:
+      email = client_email(client)
+      if not email or email in seen:
+        continue
+      clients.append(client)
+      seen.add(email)
+    settings["clients"] = clients
+    inbound["settings"] = settings
+
+def preserve_routing_state(cfg):
+  marker_users = {marker: [] for marker in managed_routing_markers}
+  marker_inbounds = {marker: [] for marker in managed_routing_inbound_markers}
+  speed_rules = []
+  for rule in (cfg.get("routing") or {}).get("rules") or []:
+    if not isinstance(rule, dict) or rule.get("type") != "field":
+      continue
+    users = rule.get("user")
+    if not isinstance(users, list):
+      continue
+    for marker in managed_routing_markers:
+      if marker in users:
+        marker_users[marker].extend(
+          [
+            user for user in users
+            if isinstance(user, str) and user and user != marker
+          ]
+        )
+    inbound_tags = rule.get("inboundTag")
+    if isinstance(inbound_tags, list):
+      for marker in managed_routing_inbound_markers:
+        if marker in inbound_tags:
+          marker_inbounds[marker].extend(
+            [
+              inbound for inbound in inbound_tags
+              if isinstance(inbound, str) and inbound and inbound != marker
+            ]
+          )
+    has_speed_marker = any(
+      isinstance(user, str) and user.startswith(speed_rule_marker_prefix)
+      for user in users
+    )
+    outbound_tag = str(rule.get("outboundTag") or "").strip()
+    if has_speed_marker and outbound_tag.startswith(speed_outbound_prefix):
+      speed_rules.append(rule)
+  deduped_marker_users = {}
+  for marker, users in marker_users.items():
+    seen = set()
+    deduped = []
+    for user in users:
+      if user in seen:
+        continue
+      seen.add(user)
+      deduped.append(user)
+    deduped_marker_users[marker] = deduped
+  deduped_marker_inbounds = {}
+  for marker, inbounds in marker_inbounds.items():
+    seen = set()
+    deduped = []
+    for inbound in inbounds:
+      if inbound in seen:
+        continue
+      seen.add(inbound)
+      deduped.append(inbound)
+    deduped_marker_inbounds[marker] = deduped
+  return deduped_marker_users, deduped_marker_inbounds, speed_rules
+
+def merge_routing_state(routing, marker_users, marker_inbounds, speed_rules):
+  rules = routing.get("rules")
+  if not isinstance(rules, list):
+    return
+  for rule in rules:
+    if not isinstance(rule, dict):
+      continue
+    users = rule.get("user")
+    if not isinstance(users, list):
+      continue
+    marker = next((item for item in users if item in managed_routing_markers), None)
+    if not marker:
+      continue
+    merged = [marker]
+    merged.extend([user for user in users if isinstance(user, str) and user and user != marker])
+    for user in marker_users.get(marker) or []:
+      if user not in merged:
+        merged.append(user)
+    rule["user"] = merged
+  for rule in rules:
+    if not isinstance(rule, dict):
+      continue
+    inbound_tags = rule.get("inboundTag")
+    if not isinstance(inbound_tags, list):
+      continue
+    marker = next((item for item in inbound_tags if item in managed_routing_inbound_markers), None)
+    if not marker:
+      continue
+    merged = [marker]
+    merged.extend([inbound for inbound in inbound_tags if isinstance(inbound, str) and inbound and inbound != marker])
+    for inbound in marker_inbounds.get(marker) or []:
+      if inbound not in merged:
+        merged.append(inbound)
+    rule["inboundTag"] = merged
+
+  if speed_rules:
+    def is_protected_rule(rule):
+      if not isinstance(rule, dict) or rule.get("type") != "field":
+        return False
+      outbound_tag = str(rule.get("outboundTag") or "").strip()
+      return outbound_tag in ("api", "blocked")
+
+    def is_hard_block_user_rule(rule):
+      if not isinstance(rule, dict) or rule.get("type") != "field":
+        return False
+      if str(rule.get("outboundTag") or "").strip() != "blocked":
+        return False
+      users = rule.get("user")
+      if not isinstance(users, list):
+        return False
+      hard_markers = {"dummy-block-user", "dummy-quota-user", "dummy-limit-user"}
+      return any(isinstance(user, str) and user in hard_markers for user in users)
+
+    prefix_rules = []
+    hard_block_rules = []
+    other_rules = []
+    for rule in rules:
+      if is_protected_rule(rule) and not is_hard_block_user_rule(rule):
+        prefix_rules.append(rule)
+      elif is_hard_block_user_rule(rule):
+        hard_block_rules.append(rule)
+      else:
+        other_rules.append(rule)
+    rules = prefix_rules + hard_block_rules + speed_rules + other_rules
+    routing["rules"] = rules
+
+def preserve_speed_outbounds(cfg):
+  preserved = []
+  seen = set()
+  for outbound in cfg.get("outbounds") or []:
+    if not isinstance(outbound, dict):
+      continue
+    tag = str(outbound.get("tag") or "").strip()
+    if not tag.startswith(speed_outbound_prefix):
+      continue
+    if tag in seen:
+      continue
+    seen.add(tag)
+    preserved.append(outbound)
+  return preserved
+
+def preserve_warp_outbound(existing_cfg, fresh_outbounds):
+  existing_warp = None
+  for outbound in existing_cfg.get("outbounds") or []:
+    if not isinstance(outbound, dict):
+      continue
+    if str(outbound.get("tag") or "").strip() != "warp":
+      continue
+    if str(outbound.get("protocol") or "").strip() != "socks":
+      continue
+    existing_warp = copy.deepcopy(outbound)
+    break
+  if existing_warp is None:
+    return
+  for idx, outbound in enumerate(fresh_outbounds):
+    if not isinstance(outbound, dict):
+      continue
+    if str(outbound.get("tag") or "").strip() != "warp":
+      continue
+    fresh_outbounds[idx] = existing_warp
+    return
+
+log_cfg = load_json_if_exists(os.path.join(srcdir, "00-log.json"), {})
+api_cfg = load_json_if_exists(os.path.join(srcdir, "01-api.json"), {})
+dns_cfg = load_json_if_exists(os.path.join(srcdir, "02-dns.json"), {})
+inbounds_cfg = load_json_if_exists(os.path.join(srcdir, "10-inbounds.json"), {})
+outbounds_cfg = load_json_if_exists(os.path.join(srcdir, "20-outbounds.json"), {})
+routing_cfg = load_json_if_exists(os.path.join(srcdir, "30-routing.json"), {})
+policy_cfg = load_json_if_exists(os.path.join(srcdir, "40-policy.json"), {})
+stats_cfg = load_json_if_exists(os.path.join(srcdir, "50-stats.json"), {})
+metrics_cfg = load_json_if_exists(os.path.join(srcdir, "60-metrics.json"), {})
+
+routing = routing_cfg.get("routing") or {}
+inbounds_fresh = inbounds_cfg.get("inbounds") or []
+if not isinstance(inbounds_fresh, list):
+  inbounds_fresh = []
+outbounds_fresh = outbounds_cfg.get("outbounds") or []
+if not isinstance(outbounds_fresh, list):
+  outbounds_fresh = []
+
+existing_inbounds = load_json_if_exists(os.path.join(outdir, "10-inbounds.json"), {})
+existing_outbounds = load_json_if_exists(os.path.join(outdir, "20-outbounds.json"), {})
+existing_routing = load_json_if_exists(os.path.join(outdir, "30-routing.json"), {})
+
+merge_clients_into_inbounds(inbounds_fresh, preserve_clients_by_proto(existing_inbounds))
+marker_users, marker_inbounds, speed_rules = preserve_routing_state(existing_routing)
+merge_routing_state(routing, marker_users, marker_inbounds, speed_rules)
+preserve_warp_outbound(existing_outbounds, outbounds_fresh)
+outbounds_fresh.extend(preserve_speed_outbounds(existing_outbounds))
+
+parts = [
+  ("00-log.json", {"log": log_cfg.get("log") or {}}),
+  ("01-api.json", {"api": api_cfg.get("api") or {}}),
+  ("02-dns.json", {"dns": dns_cfg.get("dns") or {}, "fakedns": dns_cfg.get("fakedns") or []}),
+  ("10-inbounds.json", {"inbounds": inbounds_fresh}),
+  ("20-outbounds.json", {"outbounds": outbounds_fresh}),
+  ("30-routing.json", {"routing": routing}),
+  ("40-policy.json", {"policy": policy_cfg.get("policy") or {}}),
+  ("50-stats.json", {"stats": stats_cfg.get("stats") or {}}),
+  ("60-metrics.json", {"metrics": metrics_cfg.get("metrics") or {}}),
+]
+
+os.makedirs(outdir, exist_ok=True)
+
+for name, obj in parts:
+  path = os.path.join(outdir, name)
+  tmp = f"{path}.tmp"
+  with open(tmp, "w", encoding="utf-8") as wf:
+    for line in load_leading_comment_lines(os.path.join(srcdir, name)):
+      wf.write(f"{line}\n")
+    json.dump(obj, wf, ensure_ascii=False, indent=2)
+    wf.write("\n")
+  os.replace(tmp, path)
+PY
+  rm -rf "${rendered_dir}" >/dev/null 2>&1 || true
+
+  chmod 640 "${XRAY_CONFDIR}"/*.json 2>/dev/null || true
+  ok "Config modular siap:"
+  ok "  - ${XRAY_CONFDIR}/00-log.json"
+  ok "  - ${XRAY_CONFDIR}/01-api.json"
+  ok "  - ${XRAY_CONFDIR}/02-dns.json"
+  ok "  - ${XRAY_CONFDIR}/10-inbounds.json"
+  ok "  - ${XRAY_CONFDIR}/20-outbounds.json"
+  ok "  - ${XRAY_CONFDIR}/30-routing.json"
+  ok "  - ${XRAY_CONFDIR}/40-policy.json"
+  ok "  - ${XRAY_CONFDIR}/50-stats.json"
+}
+
+ensure_xray_service_user() {
+  # Dedicated non-root service account for xray runtime.
+  getent group xray >/dev/null 2>&1 || groupadd --system xray
+  if ! id -u xray >/dev/null 2>&1; then
+    local nologin_bin
+    nologin_bin="$(command -v nologin 2>/dev/null || true)"
+    [[ -n "${nologin_bin:-}" ]] || nologin_bin="/usr/sbin/nologin"
+    useradd --system --gid xray --home-dir /var/lib/xray --create-home --shell "${nologin_bin}" xray
+  fi
+}
+
+wait_for_xray_service_stable() {
+  local settle_seconds="${1:-5}"
+  local second
+
+  for (( second=0; second<settle_seconds; second++ )); do
+    sleep 1
+    if ! systemctl is-active --quiet xray; then
+      return 1
+    fi
+  done
+
+  return 0
+}
+
+ensure_xray_service_unit() {
+  local xray_user="${1:-xray}"
+  local frag=""
+
+  frag="$(systemctl show -p FragmentPath --value xray 2>/dev/null || true)"
+  if [[ -n "${frag:-}" && -f "${frag}" ]]; then
+    return 0
+  fi
+
+  ok "Pasang fallback unit xray.service..."
+  cat >/etc/systemd/system/xray.service <<EOF
+[Unit]
+Description=Xray Service
+Documentation=https://github.com/xtls
+After=network.target nss-lookup.target
+
+[Service]
+User=${xray_user}
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+ExecStart=/usr/local/bin/xray run -config /usr/local/etc/xray/config.json
+Restart=on-failure
+RestartPreventExitStatus=23
+LimitNPROC=10000
+LimitNOFILE=1000000
+RuntimeDirectory=xray
+RuntimeDirectoryMode=0755
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+setup_xray_xhttp3_udphop_runtime() {
+  local iface helper_src
+  iface="$(ip route get 1.1.1.1 2>/dev/null | awk '/dev/ {for (i=1;i<=NF;i++) if ($i=="dev") {print $(i+1); exit}}')"
+  [[ -n "${iface}" ]] || return 0
+
+  helper_src="${SETUP_BIN_SRC_DIR:-${SCRIPT_DIR}/opt/setup/bin}/xray-xhttp3-udphop-rules.py"
+  [[ -f "${helper_src}" ]] || die "Helper UDPHop XHTTP3 tidak ditemukan: ${helper_src}"
+  install -m 0755 "${helper_src}" "${XRAY_XHTTP3_UDPHOP_BIN}"
+
+  cat > "${XRAY_XHTTP3_UDPHOP_ENV_FILE}" <<EOF
+XRAY_XHTTP3_UDPHOP_IFACE=${iface}
+XRAY_XHTTP3_UDPHOP_LISTEN_PORT=443
+XRAY_XHTTP3_UDPHOP_PORTS=${XRAY_XHTTP3_UDPHOP_PORTS}
+EOF
+  chmod 0644 "${XRAY_XHTTP3_UDPHOP_ENV_FILE}" >/dev/null 2>&1 || true
+
+  render_setup_template_or_die \
+    "systemd/xray-xhttp3-udphop.service" \
+    "/etc/systemd/system/${XRAY_XHTTP3_UDPHOP_SERVICE}" \
+    0644
+  systemctl daemon-reload
+  systemctl enable "${XRAY_XHTTP3_UDPHOP_SERVICE}" >/dev/null 2>&1 || true
+  systemctl restart "${XRAY_XHTTP3_UDPHOP_SERVICE}" >/dev/null 2>&1 || true
+}
+
+configure_xray_service_confdir() {
+  ok "Atur xray.service -> -confdir ..."
+
+  local xray_bin
+  xray_bin="$(command -v xray || true)"
+  [[ -n "${xray_bin:-}" ]] || xray_bin="/usr/local/bin/xray"
+  ensure_xray_service_user
+  ensure_xray_service_unit "xray"
+
+  # Hilangkan warning systemd "Special user nobody configured" dari unit utama.
+  local frag
+  frag="$(systemctl show -p FragmentPath --value xray 2>/dev/null || true)"
+  if [[ -n "${frag:-}" && -f "${frag}" ]]; then
+    sed -i 's/^User=nobody$/User=xray/' "${frag}" 2>/dev/null || true
+  fi
+
+  # Bersihkan drop-in yang mungkin konflik
+  mkdir -p /etc/systemd/system/xray.service.d
+  rm -f /etc/systemd/system/xray.service.d/*.conf 2>/dev/null || true
+
+  render_setup_template_or_die \
+    "systemd/xray-confdir.conf" \
+    "/etc/systemd/system/xray.service.d/10-confdir.conf" \
+    0644 \
+    "XRAY_BIN=${xray_bin}" \
+    "XRAY_CONFDIR=${XRAY_CONFDIR}"
+
+  systemctl daemon-reload
+
+  # Pastikan permission conf.d bisa dibaca oleh user xray
+  mkdir -p /usr/local/etc/xray "${XRAY_CONFDIR}"
+  chown root:xray /usr/local/etc/xray "${XRAY_CONFDIR}" >/dev/null 2>&1 || true
+  chmod 750 /usr/local/etc/xray "${XRAY_CONFDIR}" >/dev/null 2>&1 || true
+  chown root:xray "${XRAY_CONFDIR}"/*.json >/dev/null 2>&1 || true
+  chmod 640 "${XRAY_CONFDIR}"/*.json >/dev/null 2>&1 || true
+
+  if [[ -d "${CERT_DIR:-/opt/cert}" ]]; then
+    chown root:xray "${CERT_DIR:-/opt/cert}" >/dev/null 2>&1 || true
+    chmod 750 "${CERT_DIR:-/opt/cert}" >/dev/null 2>&1 || true
+  fi
+  if [[ -s "${CERT_FULLCHAIN:-/opt/cert/fullchain.pem}" && -s "${CERT_PRIVKEY:-/opt/cert/privkey.pem}" ]]; then
+    chown root:xray "${CERT_FULLCHAIN:-/opt/cert/fullchain.pem}" "${CERT_PRIVKEY:-/opt/cert/privkey.pem}" >/dev/null 2>&1 || true
+    chmod 640 "${CERT_FULLCHAIN:-/opt/cert/fullchain.pem}" "${CERT_PRIVKEY:-/opt/cert/privkey.pem}" >/dev/null 2>&1 || true
+  fi
+
+  # Pastikan direktori & file log ada
+  mkdir -p /var/log/xray
+  touch /var/log/xray/access.log /var/log/xray/error.log
+  chown xray:xray /var/log/xray /var/log/xray/access.log /var/log/xray/error.log >/dev/null 2>&1 || true
+  chmod 750 /var/log/xray
+  chmod 640 /var/log/xray/access.log /var/log/xray/error.log
+
+  # Test konfigurasi confdir sebelum restart
+  if ! "${xray_bin}" run -test -confdir "${XRAY_CONFDIR}" >/dev/null 2>&1; then
+    "${xray_bin}" run -test -confdir "${XRAY_CONFDIR}" || true
+    die "Konfigurasi confdir Xray invalid."
+  fi
+
+  systemctl enable xray >/dev/null 2>&1 || true
+  systemctl reset-failed xray >/dev/null 2>&1 || true
+  systemctl restart xray >/dev/null 2>&1 || { journalctl -u xray -n 200 --no-pager >&2 || true; die "Gagal restart xray"; }
+  if ! wait_for_xray_service_stable 5; then
+    journalctl -u xray -n 200 --no-pager >&2 || true
+    die "xray gagal stabil setelah restart."
+  fi
+  setup_xray_xhttp3_udphop_runtime
+  ok "xray.service aktif."
+
+  # Setelah Xray berjalan menggunakan conf.d, config.json tidak diperlukan lagi.
+  if [[ -f "${XRAY_CONFIG}" ]]; then
+    rm -f "${XRAY_CONFIG}" 2>/dev/null || true
+    ok "Config bawaan dihapus: ${XRAY_CONFIG}"
+  fi
+}
+
+
+
+setup_xray_geodata_updater() {
+  ok "Pasang updater geodata..."
+
+  cat > /usr/local/bin/xray-update-geodata <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+URL="${XRAY_INSTALL_SCRIPT_URL}"
+tmp="\$(mktemp)"
+cleanup() {
+  rm -f "\${tmp}" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+curl -fsSL --connect-timeout 15 --max-time 120 "\${URL}" -o "\${tmp}"
+bash "\${tmp}" install-geodata >/dev/null 2>&1
+EOF
+
+  chmod +x /usr/local/bin/xray-update-geodata
+
+  cat > /etc/cron.d/xray-update-geodata <<'EOF'
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+0 4 * * * root /usr/local/bin/xray-update-geodata >/dev/null 2>&1
+EOF
+
+  ok "Cron geodata siap."
+
+
+  ok "Update geodata awal..."
+  /usr/local/bin/xray-update-geodata || die "Gagal update geodata pertama kali (cek koneksi ke github.com)."
+  ok "Geodata awal selesai."
+
+}
+
+install_xray_speed_limiter_foundation() {
+  ok "Pasang xray-speed..."
+
+  mkdir -p "${SPEED_POLICY_ROOT}" "${SPEED_STATE_DIR}" "${SPEED_CONFIG_DIR}"
+  chmod 700 "${SPEED_POLICY_ROOT}" "${SPEED_STATE_DIR}" "${SPEED_CONFIG_DIR}" || true
+
+  local proto
+  for proto in "${SPEED_PROTO_DIRS[@]}"; do
+    mkdir -p "${SPEED_POLICY_ROOT}/${proto}"
+    chmod 700 "${SPEED_POLICY_ROOT}/${proto}" || true
+  done
+
+  render_setup_template_or_die     "config/xray-speed-config.json"     "${SPEED_CONFIG_DIR}/config.json"     0600     "SPEED_POLICY_ROOT=${SPEED_POLICY_ROOT}"     "SPEED_STATE_FILE=${SPEED_STATE_DIR}/state.json"
+
+  install_setup_bin_or_die "xray-speed.py" "/usr/local/bin/xray-speed" 0755
+
+  render_setup_template_or_die     "systemd/xray-speed.service"     "/etc/systemd/system/xray-speed.service"     0644
+
+  systemctl daemon-reload
+  if service_enable_restart_checked xray-speed; then
+    ok "xray-speed aktif:"
+    ok "  - policy root: ${SPEED_POLICY_ROOT}/{vless,vmess,trojan}"
+    ok "  - config: ${SPEED_CONFIG_DIR}/config.json"
+    ok "  - binary: /usr/local/bin/xray-speed"
+    ok "  - service: xray-speed"
+  else
+    warn "xray-speed gagal aktif otomatis. Bisa diaktifkan manual:"
+    warn "  systemctl status xray-speed --no-pager"
+    warn "  journalctl -u xray-speed -n 100 --no-pager"
+    systemctl disable --now xray-speed >/dev/null 2>&1 || true
+  fi
+}
