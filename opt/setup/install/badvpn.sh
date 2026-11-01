@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-# BadVPN UDPGW installer with binary compatibility validation and MUSL static fallback.
 
 BADVPN_DIST_DIR="${SCRIPT_DIR}/opt/badvpn/dist"
 BADVPN_RUNTIME_ENV_FILE="${BADVPN_RUNTIME_ENV_FILE:-/etc/default/badvpn-udpgw}"
@@ -10,8 +9,8 @@ BADVPN_LAUNCHER_SRC="${SCRIPT_DIR}/opt/setup/bin/badvpn-udpgw-launcher.sh"
 BADVPN_LAUNCHER_INSTALL_PATH="${BADVPN_LAUNCHER_INSTALL_PATH:-/usr/local/bin/badvpn-udpgw-launcher}"
 BADVPN_SERVICE_NAME="${BADVPN_SERVICE_NAME:-badvpn-udpgw.service}"
 BADVPN_UDPGW_PORTS_DEFAULT="${BADVPN_UDPGW_PORTS_DEFAULT:-7300 7400 7500 7600 7700 7800 7900}"
-BADVPN_SOURCE_DIR="${BADVPN_SOURCE_DIR:-/usr/local/src/badvpn}"
-BADVPN_BUILD_DIR="${BADVPN_BUILD_DIR:-/usr/local/src/badvpn/build-musl}"
+BADVPN_SOURCE_DIR="${BADVPN_SOURCE_DIR:-/usr/local/src/dlgst-badvpn-source}"
+BADVPN_BUILD_DIR="${BADVPN_BUILD_DIR:-/usr/local/src/dlgst-badvpn-build-musl}"
 
 badvpn_arch_label() {
   case "$(uname -m)" in
@@ -27,60 +26,57 @@ badvpn_expected_binary_path() {
   printf '%s/badvpn-udpgw-linux-%s\n' "${BADVPN_DIST_DIR}" "${arch}"
 }
 
-# Validates that a candidate is an executable ELF and has no unresolved
-# shared-library/GLIBC requirement. Static MUSL binaries are preferred.
-badvpn_binary_compatible() {
-  local bin="$1" info deps
-  [[ -f "${bin}" && -x "${bin}" ]] || return 1
-  command -v file >/dev/null 2>&1 || return 1
-  info="$(file -b "${bin}" 2>/dev/null || true)"
-  [[ "${info}" == *ELF* ]] || return 1
+# Cek dependensi runtime dan eksekusi, bukan sekadar keberadaan file.
+# Ini mendeteksi binary yang meminta GLIBC lebih baru daripada OS host.
+badvpn_binary_usable() {
+  local bin="$1" deps
+  [[ -x "${bin}" && -f "${bin}" ]] || return 1
 
   if command -v ldd >/dev/null 2>&1; then
     deps="$(ldd "${bin}" 2>&1 || true)"
-    [[ "${deps}" != *"not found"* ]] || return 1
-    [[ "${deps}" != *"GLIBC_"*"not found"* ]] || return 1
+    if grep -Eqi 'not found|GLIBC_[0-9.]+ not found' <<<"${deps}"; then
+      return 1
+    fi
   fi
 
-  # A quick execution check catches wrong-architecture and loader failures.
-  command -v timeout >/dev/null 2>&1 || return 1
   timeout 5 "${bin}" --help >/dev/null 2>&1
 }
 
 badvpn_prebuilt_ready() {
   local bin
   bin="$(badvpn_expected_binary_path)" || return 1
-  badvpn_binary_compatible "${bin}"
-}
-
-badvpn_runtime_expected() {
-  badvpn_prebuilt_ready || badvpn_binary_compatible "${BADVPN_BIN_INSTALL_PATH}"
+  [[ -f "${bin}" && -x "${bin}" ]]
 }
 
 badvpn_install_build_dependencies() {
+  command -v apt-get >/dev/null 2>&1 || die "Build BadVPN otomatis saat ini membutuhkan apt-get (Debian/Ubuntu)."
   export DEBIAN_FRONTEND=noninteractive
   apt-get update
   apt-get install -y --no-install-recommends \
-    ca-certificates git cmake build-essential musl-tools file
+    ca-certificates git cmake build-essential musl-tools
+  command -v musl-gcc >/dev/null 2>&1 || die "musl-gcc tidak ditemukan setelah instalasi musl-tools."
 }
 
 badvpn_prepare_source() {
-  if [[ ! -f "${BADVPN_SOURCE_DIR}/CMakeLists.txt" ]]; then
-    install -d -m 0755 "$(dirname "${BADVPN_SOURCE_DIR}")"
-    git clone --depth 1 https://github.com/ambrop72/badvpn.git "${BADVPN_SOURCE_DIR}" \
-      || die "Gagal mengambil source BadVPN dari repository resmi."
+  if [[ -f "${BADVPN_SOURCE_DIR}/CMakeLists.txt" ]]; then
+    return 0
   fi
-  [[ -f "${BADVPN_SOURCE_DIR}/CMakeLists.txt" ]] \
-    || die "Source BadVPN tidak valid: ${BADVPN_SOURCE_DIR}"
+
+  install -d -m 0755 "$(dirname "${BADVPN_SOURCE_DIR}")"
+  rm -rf "${BADVPN_SOURCE_DIR}.download"
+  git clone --depth 1 https://github.com/ambrop72/badvpn.git "${BADVPN_SOURCE_DIR}.download" \
+    || die "Gagal mengambil source BadVPN dari GitHub."
+  [[ -f "${BADVPN_SOURCE_DIR}.download/CMakeLists.txt" ]] \
+    || die "Source BadVPN tidak memiliki CMakeLists.txt."
+  rm -rf "${BADVPN_SOURCE_DIR}"
+  mv "${BADVPN_SOURCE_DIR}.download" "${BADVPN_SOURCE_DIR}"
 }
 
 badvpn_build_musl_static() {
   local built="${BADVPN_BUILD_DIR}/udpgw/badvpn-udpgw"
-  warn "Binary BadVPN prebuilt tidak kompatibel. Menyiapkan build MUSL static."
+  log "Binary BadVPN prebuilt tidak kompatibel/tersedia. Build MUSL static dimulai."
 
   badvpn_install_build_dependencies
-  command -v musl-gcc >/dev/null 2>&1 \
-    || die "musl-gcc tidak tersedia setelah instalasi musl-tools."
   badvpn_prepare_source
 
   rm -rf "${BADVPN_BUILD_DIR}"
@@ -88,39 +84,50 @@ badvpn_build_musl_static() {
     -DBUILD_NOTHING_BY_DEFAULT=1 \
     -DBUILD_UDPGW=1 \
     -DCMAKE_C_COMPILER=musl-gcc \
+    -DCMAKE_C_FLAGS="-O2 -pipe" \
     -DCMAKE_EXE_LINKER_FLAGS="-static" \
-    -DCMAKE_BUILD_TYPE=Release \
     || die "Konfigurasi CMake BadVPN MUSL gagal."
 
   cmake --build "${BADVPN_BUILD_DIR}" --parallel "$(nproc)" \
     || die "Kompilasi BadVPN MUSL gagal."
 
   [[ -x "${built}" ]] || die "Binary hasil build tidak ditemukan: ${built}"
-  badvpn_binary_compatible "${built}" \
-    || die "Binary hasil build MUSL gagal validasi kompatibilitas/eksekusi."
+  badvpn_binary_usable "${built}" \
+    || die "Binary BadVPN hasil MUSL build gagal validasi eksekusi."
+
+  if command -v ldd >/dev/null 2>&1; then
+    local deps
+    deps="$(ldd "${built}" 2>&1 || true)"
+    if ! grep -Eqi 'not a dynamic executable|statically linked' <<<"${deps}"; then
+      warn "ldd tidak mengonfirmasi static secara eksplisit; hasil tetap diuji dengan eksekusi --help."
+    fi
+  fi
 
   printf '%s\n' "${built}"
 }
 
-badvpn_resolve_binary() {
-  local prebuilt built
-  prebuilt="$(badvpn_expected_binary_path 2>/dev/null || true)"
-  if [[ -n "${prebuilt}" ]] && badvpn_binary_compatible "${prebuilt}"; then
+badvpn_select_binary() {
+  local prebuilt=""
+  if prebuilt="$(badvpn_expected_binary_path 2>/dev/null)" && badvpn_binary_usable "${prebuilt}"; then
     printf '%s\n' "${prebuilt}"
-    return 0
-  fi
-
-  # Reuse a previously built static binary if it still passes validation.
-  built="${BADVPN_BUILD_DIR}/udpgw/badvpn-udpgw"
-  if badvpn_binary_compatible "${built}"; then
-    printf '%s\n' "${built}"
     return 0
   fi
 
   badvpn_build_musl_static
 }
 
+badvpn_runtime_expected() {
+  badvpn_binary_usable "${BADVPN_BIN_INSTALL_PATH}"
+}
+
 write_badvpn_runtime_env() {
+  # Jangan menimpa konfigurasi port/limit milik pengguna pada instalasi ulang.
+  if [[ -s "${BADVPN_RUNTIME_ENV_FILE}" ]]; then
+    chmod 0644 "${BADVPN_RUNTIME_ENV_FILE}" 2>/dev/null || true
+    return 0
+  fi
+
+  install -d -m 0755 "$(dirname "${BADVPN_RUNTIME_ENV_FILE}")"
   if [[ -f "${BADVPN_RUNTIME_ENV_TEMPLATE}" ]]; then
     render_setup_template_or_die "config/badvpn-runtime.env" "${BADVPN_RUNTIME_ENV_FILE}" 0644
   else
@@ -136,28 +143,32 @@ EOF
 
 install_badvpn_udpgw_stack() {
   local bin src_name tmp_bin
-  [[ -f "${BADVPN_SERVICE_TEMPLATE}" ]] \
-    || die "Template service BadVPN UDPGW tidak ditemukan: ${BADVPN_SERVICE_TEMPLATE}"
-  [[ -f "${BADVPN_LAUNCHER_SRC}" ]] \
-    || die "Launcher BadVPN tidak ditemukan: ${BADVPN_LAUNCHER_SRC}"
+  if [[ ! -f "${BADVPN_SERVICE_TEMPLATE}" ]]; then
+    die "Template service BadVPN UDPGW tidak ditemukan: ${BADVPN_SERVICE_TEMPLATE}"
+  fi
+  [[ -x "${BADVPN_LAUNCHER_SRC}" ]] || die "Launcher BadVPN tidak ditemukan/ tidak executable: ${BADVPN_LAUNCHER_SRC}"
 
-  bin="$(badvpn_resolve_binary)" || die "Tidak dapat menyediakan binary BadVPN yang kompatibel."
+  bin="$(badvpn_select_binary)" || die "Tidak dapat menyediakan binary BadVPN yang kompatibel."
   src_name="$(basename "${bin}")"
 
   install -d -m 0755 "$(dirname "${BADVPN_BIN_INSTALL_PATH}")"
-  if [[ -f "${BADVPN_BIN_INSTALL_PATH}" ]]; then
-    cp -a "${BADVPN_BIN_INSTALL_PATH}" \
-      "${BADVPN_BIN_INSTALL_PATH}.backup.$(date +%Y%m%d%H%M%S)"
-  fi
-  tmp_bin="${BADVPN_BIN_INSTALL_PATH}.new"
+  tmp_bin="${BADVPN_BIN_INSTALL_PATH}.new.$$"
   install -o root -g root -m 0755 "${bin}" "${tmp_bin}"
-  badvpn_binary_compatible "${tmp_bin}" \
-    || { rm -f "${tmp_bin}"; die "Binary BadVPN gagal validasi setelah disalin."; }
+  badvpn_binary_usable "${tmp_bin}" || {
+    rm -f "${tmp_bin}"
+    die "Validasi binary BadVPN sementara gagal; binary lama tidak diubah."
+  }
+
+  if [[ -e "${BADVPN_BIN_INSTALL_PATH}" ]]; then
+    cp -a "${BADVPN_BIN_INSTALL_PATH}" "${BADVPN_BIN_INSTALL_PATH}.backup.$(date +%Y%m%d%H%M%S)"
+  fi
   mv -f "${tmp_bin}" "${BADVPN_BIN_INSTALL_PATH}"
+  chown root:root "${BADVPN_BIN_INSTALL_PATH}" 2>/dev/null || true
 
-  install -o root -g root -m 0755 "${BADVPN_LAUNCHER_SRC}" "${BADVPN_LAUNCHER_INSTALL_PATH}"
+  install -m 0755 "${BADVPN_LAUNCHER_SRC}" "${BADVPN_LAUNCHER_INSTALL_PATH}"
+  chown root:root "${BADVPN_LAUNCHER_INSTALL_PATH}" 2>/dev/null || true
+
   write_badvpn_runtime_env
-
   render_setup_template_or_die \
     "systemd/badvpn-udpgw.service" \
     "/etc/systemd/system/${BADVPN_SERVICE_NAME}" \
@@ -167,9 +178,12 @@ install_badvpn_udpgw_stack() {
     "BADVPN_RUNTIME_ENV_FILE=${BADVPN_RUNTIME_ENV_FILE}"
 
   systemctl daemon-reload >/dev/null 2>&1 || true
-  systemctl enable "${BADVPN_SERVICE_NAME}" --now >/dev/null 2>&1 \
-    || die "Gagal mengaktifkan ${BADVPN_SERVICE_NAME}"
+  systemctl enable "${BADVPN_SERVICE_NAME}" >/dev/null 2>&1 \
+    || die "Gagal enable ${BADVPN_SERVICE_NAME}"
+  systemctl restart "${BADVPN_SERVICE_NAME}" \
+    || die "Gagal menjalankan ulang ${BADVPN_SERVICE_NAME}"
   systemctl is-active --quiet "${BADVPN_SERVICE_NAME}" \
     || die "${BADVPN_SERVICE_NAME} tidak active."
-  ok "BadVPN UDPGW aktif (${src_name})"
+
+  ok "BadVPN UDPGW aktif (${src_name}); runtime config dipertahankan."
 }
