@@ -1,0 +1,1810 @@
+{
+  "menus": [
+    {
+      "id": "1",
+      "label": "Xray Users",
+      "description": "Kelola akun Xray dengan susunan menu yang mengikuti CLI.",
+      "actions": [
+        {
+          "id": "open_xray_users",
+          "label": "Xray Users",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "22"
+        }
+      ]
+    },
+    {
+      "id": "2",
+      "label": "SSH Users",
+      "description": "Kelola akun SSH dengan susunan menu yang mengikuti CLI.",
+      "actions": [
+        {
+          "id": "open_ssh_users",
+          "label": "SSH Users",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "23"
+        }
+      ]
+    },
+    {
+      "id": "3",
+      "label": "Xray QAC",
+      "description": "Quota, IP/Login limit, dan speed limit untuk akun Xray.",
+      "actions": [
+        {
+          "id": "open_xray_qac",
+          "label": "Xray QAC",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "24"
+        }
+      ]
+    },
+    {
+      "id": "4",
+      "label": "SSH QAC",
+      "description": "Quota, IP limit, dan speed limit untuk akun SSH.",
+      "actions": [
+        {
+          "id": "open_ssh_qac",
+          "label": "SSH QAC",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "25"
+        }
+      ]
+    },
+    {
+      "id": "5",
+      "label": "Xray Network",
+      "description": "Kontrol cepat jaringan Xray: WARP, DNS, dan runtime ringan.",
+      "actions": [
+        {
+          "id": "open_xray_network",
+          "label": "Xray Network",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "33"
+        }
+      ]
+    },
+    {
+      "id": "6",
+      "label": "SSH Network",
+      "description": "Kontrol cepat DNS for SSH dan WARP SSH Global.",
+      "actions": [
+        {
+          "id": "open_ssh_network",
+          "label": "SSH Network",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "34"
+        }
+      ]
+    },
+    {
+      "id": "15",
+      "label": "Backup/Restore",
+      "description": "Backup dan restore via Google Drive, Cloudflare R2, atau Telegram.",
+      "actions": [
+        {
+          "id": "open_backup_restore",
+          "label": "Backup/Restore",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "45"
+        }
+      ]
+    },
+    {
+      "id": "22",
+      "label": "Xray Users",
+      "description": "Kelola pengguna Xray, masa aktif, pencarian, dan informasi akun.",
+      "actions": [
+        {
+          "id": "add_user",
+          "label": "Add User",
+          "mode": "modal",
+          "style": "success",
+          "modal": {
+            "title": "Add Xray User",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              },
+              {
+                "id": "days",
+                "label": "Masa Aktif (hari)",
+                "style": "short",
+                "required": true,
+                "placeholder": "30"
+              },
+              {
+                "id": "quota_gb",
+                "label": "Quota (GB)",
+                "style": "short",
+                "required": true,
+                "placeholder": "100"
+              },
+              {
+                "id": "ip_limit",
+                "label": "IP/Login Limit",
+                "style": "short",
+                "required": false,
+                "placeholder": "0 = OFF"
+              },
+              {
+                "id": "speed_limit_enabled",
+                "label": "Speed Limit (opsional)",
+                "style": "short",
+                "required": false,
+                "placeholder": "on/off"
+              },
+              {
+                "id": "speed_down_mbit",
+                "label": "Speed Download Mbps",
+                "style": "short",
+                "required": false,
+                "placeholder": "contoh: 20"
+              },
+              {
+                "id": "speed_up_mbit",
+                "label": "Speed Upload Mbps",
+                "style": "short",
+                "required": false,
+                "placeholder": "contoh: 10"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "delete_user",
+          "label": "Delete User",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "modal": {
+            "title": "Delete Xray User",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "extend_expiry",
+          "label": "Set User Expiry",
+          "mode": "modal",
+          "style": "primary",
+          "confirm": true,
+          "modal": {
+            "title": "Extend/Set Xray Expiry",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              },
+              {
+                "id": "mode",
+                "label": "Mode",
+                "style": "short",
+                "required": true,
+                "placeholder": "extend / set"
+              },
+              {
+                "id": "value",
+                "label": "Value",
+                "style": "short",
+                "required": true,
+                "placeholder": "7 atau 2026-12-31"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "reset_credential",
+          "label": "Reset UUID/Password",
+          "mode": "modal",
+          "style": "secondary",
+          "confirm": true,
+          "modal": {
+            "title": "Reset Xray UUID/Password",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "account_info",
+          "label": "View Account Info",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Xray Account Info",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          }
+        },
+        {
+          "id": "list_users",
+          "label": "View User List",
+          "mode": "direct",
+          "style": "primary"
+        },
+        {
+          "id": "search_user",
+          "label": "Search User",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Search User",
+            "fields": [
+              {
+                "id": "query",
+                "label": "Username Query",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          }
+        }
+      ],
+      "hidden": true,
+      "parent_menu": "1"
+    },
+    {
+      "id": "23",
+      "label": "SSH Users",
+      "description": "Kelola akun SSH, masa aktif, password, sesi SSHWS, dan informasi akun.",
+      "actions": [
+        {
+          "id": "add_user",
+          "label": "Add User",
+          "mode": "modal",
+          "style": "success",
+          "modal": {
+            "title": "Add SSH User",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              },
+              {
+                "id": "password",
+                "label": "Password SSH",
+                "style": "short",
+                "required": true,
+                "placeholder": "password SSH wajib diisi"
+              },
+              {
+                "id": "days",
+                "label": "Masa Aktif (hari)",
+                "style": "short",
+                "required": true,
+                "placeholder": "30"
+              },
+              {
+                "id": "quota_gb",
+                "label": "Quota (GB)",
+                "style": "short",
+                "required": true,
+                "placeholder": "100"
+              },
+              {
+                "id": "ip_limit",
+                "label": "IP/Login Limit",
+                "style": "short",
+                "required": false,
+                "placeholder": "0 = OFF"
+              },
+              {
+                "id": "speed_limit_enabled",
+                "label": "Speed Limit (opsional)",
+                "style": "short",
+                "required": false,
+                "placeholder": "on/off"
+              },
+              {
+                "id": "speed_down_mbit",
+                "label": "Speed Download Mbps",
+                "style": "short",
+                "required": false,
+                "placeholder": "contoh: 20"
+              },
+              {
+                "id": "speed_up_mbit",
+                "label": "Speed Upload Mbps",
+                "style": "short",
+                "required": false,
+                "placeholder": "contoh: 10"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "delete_user",
+          "label": "Delete User",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "modal": {
+            "title": "Delete SSH User",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "extend_expiry",
+          "label": "Set User Expiry",
+          "mode": "modal",
+          "style": "primary",
+          "confirm": true,
+          "modal": {
+            "title": "Extend/Set SSH Expiry",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              },
+              {
+                "id": "mode",
+                "label": "Mode",
+                "style": "short",
+                "required": true,
+                "placeholder": "extend / set"
+              },
+              {
+                "id": "value",
+                "label": "Value",
+                "style": "short",
+                "required": true,
+                "placeholder": "7 atau 2026-12-31"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "reset_password",
+          "label": "Reset SSH Password",
+          "mode": "modal",
+          "style": "secondary",
+          "confirm": true,
+          "modal": {
+            "title": "Reset SSH Password",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              },
+              {
+                "id": "password",
+                "label": "Password Baru",
+                "style": "short",
+                "required": true,
+                "placeholder": "password SSH baru"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "list_users",
+          "label": "View User List",
+          "mode": "direct",
+          "style": "primary"
+        },
+        {
+          "id": "search_user",
+          "label": "Search User",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Search User",
+            "fields": [
+              {
+                "id": "query",
+                "label": "Username Query",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          }
+        },
+        {
+          "id": "account_info",
+          "label": "View Account Info",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "SSH Account Info",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          }
+        }
+      ],
+      "hidden": true,
+      "parent_menu": "2"
+    },
+    {
+      "id": "24",
+      "label": "Xray QAC",
+      "description": "Ringkasan kuota dan kontrol akses per pengguna Xray.",
+      "actions": [
+        {
+          "id": "detail",
+          "label": "Detail",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Xray Quota Detail",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          }
+        },
+        {
+          "id": "set_quota_limit",
+          "label": "Set Quota",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set Xray Quota Limit",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "quota_gb",
+                "label": "Quota GB",
+                "style": "short",
+                "required": true,
+                "placeholder": "100"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "reset_quota_used",
+          "label": "Reset Used",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "modal": {
+            "title": "Reset Xray Quota Used",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "manual_block",
+          "label": "Block / Unblock",
+          "mode": "modal",
+          "style": "danger",
+          "modal": {
+            "title": "Xray Manual Block",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "enabled",
+                "label": "Enabled",
+                "style": "short",
+                "required": true,
+                "placeholder": "on / off"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "ip_limit_enable",
+          "label": "Toggle IP/Login",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Xray IP/Login Limit Enable/Disable",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "enabled",
+                "label": "Enabled",
+                "style": "short",
+                "required": true,
+                "placeholder": "on / off"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_ip_limit",
+          "label": "Set IP/Login",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set Xray IP/Login Limit",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "ip_limit",
+                "label": "IP/Login Limit",
+                "style": "short",
+                "required": true,
+                "placeholder": "2"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "unlock_ip_lock",
+          "label": "Unlock IP Lock",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Unlock Xray IP Lock",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_speed_download",
+          "label": "Set Speed Down",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set Xray Speed Download",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "speed_down_mbit",
+                "label": "Speed Down Mbps",
+                "style": "short",
+                "required": true,
+                "placeholder": "20"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_speed_upload",
+          "label": "Set Speed Up",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set Xray Speed Upload",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "speed_up_mbit",
+                "label": "Speed Up Mbps",
+                "style": "short",
+                "required": true,
+                "placeholder": "10"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "speed_limit",
+          "label": "Toggle Speed",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Xray Speed Limit Enable/Disable",
+            "fields": [
+              {
+                "id": "proto",
+                "label": "Protocol",
+                "style": "short",
+                "required": true,
+                "placeholder": "vless/vmess/trojan"
+              },
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "enabled",
+                "label": "Enabled",
+                "style": "short",
+                "required": true,
+                "placeholder": "on / off"
+              }
+            ]
+          },
+          "dangerous": true
+        }
+      ],
+      "hidden": true,
+      "parent_menu": "3"
+    },
+    {
+      "id": "25",
+      "label": "SSH QAC",
+      "description": "Ringkasan quota dan kontrol akses per akun SSH.",
+      "actions": [
+        {
+          "id": "detail",
+          "label": "Detail",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "SSH Quota Detail",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: alice"
+              }
+            ]
+          }
+        },
+        {
+          "id": "set_quota_limit",
+          "label": "Set Quota",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set SSH Quota Limit",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "quota_gb",
+                "label": "Quota GB",
+                "style": "short",
+                "required": true,
+                "placeholder": "100"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "reset_quota_used",
+          "label": "Reset Used",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "modal": {
+            "title": "Reset SSH Quota Used",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "manual_block",
+          "label": "Block / Unblock",
+          "mode": "modal",
+          "style": "danger",
+          "modal": {
+            "title": "SSH Manual Block",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "enabled",
+                "label": "Enabled",
+                "style": "short",
+                "required": true,
+                "placeholder": "on / off"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "ip_limit_enable",
+          "label": "Toggle IP/Login",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "SSH IP/Login Limit Enable/Disable",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "enabled",
+                "label": "Enabled",
+                "style": "short",
+                "required": true,
+                "placeholder": "on / off"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_ip_limit",
+          "label": "Set IP/Login",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set SSH IP/Login Limit",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "ip_limit",
+                "label": "IP/Login Limit",
+                "style": "short",
+                "required": true,
+                "placeholder": "2"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "unlock_ip_lock",
+          "label": "Unlock IP Lock",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Unlock SSH IP Lock",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_speed_download",
+          "label": "Set Speed Down",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set SSH Speed Download",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "speed_down_mbit",
+                "label": "Speed Down Mbps",
+                "style": "short",
+                "required": true,
+                "placeholder": "20"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_speed_upload",
+          "label": "Set Speed Up",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set SSH Speed Upload",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "speed_up_mbit",
+                "label": "Speed Up Mbps",
+                "style": "short",
+                "required": true,
+                "placeholder": "10"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "speed_limit",
+          "label": "Toggle Speed",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "SSH Speed Limit Enable/Disable",
+            "fields": [
+              {
+                "id": "username",
+                "label": "Username",
+                "style": "short",
+                "required": true,
+                "placeholder": "alice"
+              },
+              {
+                "id": "enabled",
+                "label": "Enabled",
+                "style": "short",
+                "required": true,
+                "placeholder": "on / off"
+              }
+            ]
+          },
+          "dangerous": true
+        }
+      ],
+      "hidden": true,
+      "parent_menu": "4"
+    },
+    {
+      "id": "32",
+      "label": "Telegram",
+      "description": "Backup lokal dan restore via arsip Telegram.\n- restore penuh akan menimpa runtime aktif\n- opsi domain-only hanya ganti domain + refresh ACCOUNT INFO\n- gunakan restore hanya untuk rollback / recovery",
+      "actions": [
+        {
+          "id": "create_backup",
+          "label": "Create Backup",
+          "mode": "direct",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "list_backups",
+          "label": "List Backups",
+          "mode": "direct",
+          "style": "primary"
+        },
+        {
+          "id": "restore_latest",
+          "label": "Restore Latest Backup",
+          "mode": "direct",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "restore_latest_domain_only",
+          "label": "Restore Latest Domain Only",
+          "mode": "direct",
+          "style": "secondary",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "restore_from_upload",
+          "label": "Restore Upload",
+          "mode": "direct",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "restore_upload_domain_only",
+          "label": "Restore Upload Domain Only",
+          "mode": "direct",
+          "style": "secondary",
+          "confirm": true,
+          "dangerous": true
+        }
+      ],
+      "hidden": true,
+      "parent_menu": "45"
+    },
+    {
+      "id": "33",
+      "label": "Xray Network",
+      "description": "Quick controls WARP dan DNS untuk Xray.",
+      "hidden": true,
+      "parent_menu": "5",
+      "actions": [
+        {
+          "id": "warp_status",
+          "label": "View WARP Status",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "warp_restart",
+          "label": "Restart WARP",
+          "mode": "direct",
+          "style": "secondary",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "set_warp_global_mode",
+          "label": "Set WARP Global",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set WARP Global Mode",
+            "fields": [
+              {
+                "id": "mode",
+                "label": "Mode",
+                "style": "short",
+                "required": true,
+                "placeholder": "direct / warp"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "dns_summary",
+          "label": "View DNS Summary",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "set_dns_primary",
+          "label": "Set Primary DNS",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set Primary DNS",
+            "fields": [
+              {
+                "id": "dns",
+                "label": "Primary DNS",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 1.1.1.1"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_dns_secondary",
+          "label": "Set Secondary DNS",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set Secondary DNS",
+            "fields": [
+              {
+                "id": "dns",
+                "label": "Secondary DNS",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 8.8.8.8"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "set_dns_query_strategy",
+          "label": "Set DNS Strategy",
+          "mode": "modal",
+          "style": "secondary",
+          "modal": {
+            "title": "Set DNS Query Strategy",
+            "fields": [
+              {
+                "id": "strategy",
+                "label": "Query Strategy",
+                "style": "short",
+                "required": true,
+                "placeholder": "UseIP/... atau default untuk reset"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "toggle_dns_cache",
+          "label": "Toggle DNS Cache OFF/Default",
+          "mode": "direct",
+          "style": "secondary",
+          "confirm": true,
+          "dangerous": true
+        }
+      ]
+    },
+    {
+      "id": "34",
+      "label": "SSH Network",
+      "description": "Quick controls DNS for SSH dan WARP SSH Global.",
+      "hidden": true,
+      "parent_menu": "6",
+      "actions": [
+        {
+          "id": "open_ssh_network_dns",
+          "label": "DNS for SSH",
+          "mode": "menu",
+          "style": "secondary",
+          "target_menu": "37"
+        },
+        {
+          "id": "open_ssh_network_warp_global",
+          "label": "WARP SSH Global",
+          "mode": "menu",
+          "style": "secondary",
+          "target_menu": "40"
+        }
+      ]
+    },
+    {
+      "id": "37",
+      "label": "DNS for SSH",
+      "description": "Kontrol DNS steering SSH yang memakai backend SSH Adblock runtime yang sama.",
+      "hidden": true,
+      "parent_menu": "34",
+      "actions": [
+        {
+          "id": "dns_for_ssh_status",
+          "label": "Show Status",
+          "mode": "direct",
+          "style": "primary"
+        },
+        {
+          "id": "dns_for_ssh_enable",
+          "label": "Enable DNS Steering",
+          "mode": "direct",
+          "style": "success",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "dns_for_ssh_disable",
+          "label": "Disable DNS Steering",
+          "mode": "direct",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "dns_for_ssh_set_primary",
+          "label": "Set Primary DNS",
+          "mode": "modal",
+          "style": "secondary",
+          "confirm": true,
+          "modal": {
+            "title": "Set Primary DNS SSH",
+            "fields": [
+              {
+                "id": "dns",
+                "label": "Primary DNS",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 1.1.1.1"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "dns_for_ssh_set_secondary",
+          "label": "Set Secondary DNS",
+          "mode": "modal",
+          "style": "secondary",
+          "confirm": true,
+          "modal": {
+            "title": "Set Secondary DNS SSH",
+            "fields": [
+              {
+                "id": "dns",
+                "label": "Secondary DNS",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 8.8.8.8"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "dns_for_ssh_apply",
+          "label": "Apply DNS Runtime",
+          "mode": "direct",
+          "style": "secondary",
+          "confirm": true,
+          "dangerous": true
+        }
+      ]
+    },
+    {
+      "id": "40",
+      "label": "WARP SSH Global",
+      "description": "Enable atau disable WARP global untuk trafik SSH.",
+      "hidden": true,
+      "parent_menu": "34",
+      "actions": [
+        {
+          "id": "warp_ssh_global_status",
+          "label": "Show Status",
+          "mode": "direct",
+          "style": "primary"
+        },
+        {
+          "id": "warp_ssh_global_enable",
+          "label": "Enable WARP Global",
+          "mode": "direct",
+          "style": "success",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "warp_ssh_global_disable",
+          "label": "Disable WARP Global",
+          "mode": "direct",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true
+        }
+      ]
+    },
+    {
+      "id": "45",
+      "label": "Backup/Restore",
+      "description": "Provider yang tersedia:\n- Google Drive  : mudah dipakai, cocok untuk akun personal.\n- Cloudflare R2 : lebih cocok untuk backup server/object storage.\n\nRekomendasi:\n- Google Drive bila ingin simpan backup di Drive pribadi.\n- Cloudflare R2 bila ingin backend cloud yang lebih native.\n\nCatatan:\n- restore bersifat live dan akan menimpa runtime aktif\n- gunakan restore hanya untuk rollback / recovery",
+      "hidden": true,
+      "parent_menu": "15",
+      "actions": [
+        {
+          "id": "open_backup_gdrive",
+          "label": "Google Drive",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "46"
+        },
+        {
+          "id": "open_backup_r2",
+          "label": "Cloudflare R2",
+          "mode": "menu",
+          "style": "primary",
+          "target_menu": "47"
+        },
+        {
+          "id": "open_backup_telegram",
+          "label": "Telegram",
+          "mode": "menu",
+          "style": "secondary",
+          "target_menu": "32"
+        }
+      ]
+    },
+    {
+      "id": "46",
+      "label": "Google Drive",
+      "description": "Google Drive:\n- cocok untuk backup pribadi\n- setup awal via OAuth, bisa dibantu bot atau SSH terminal VPS\n- paling nyaman untuk simpan arsip backup di Drive sendiri\n- restore penuh akan menimpa runtime aktif",
+      "hidden": true,
+      "parent_menu": "45",
+      "actions": [
+        {
+          "id": "open_gdrive_setup",
+          "label": "Setup",
+          "mode": "menu",
+          "style": "secondary",
+          "target_menu": "48"
+        },
+        {
+          "id": "gdrive_status",
+          "label": "Status Config",
+          "mode": "direct",
+          "style": "primary"
+        },
+        {
+          "id": "gdrive_test_remote",
+          "label": "Test Remote",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "gdrive_create_upload",
+          "label": "Create & Upload Backup",
+          "mode": "direct",
+          "style": "secondary",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "gdrive_list_backups",
+          "label": "List Cloud Backups",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "gdrive_restore_latest",
+          "label": "Restore Latest Cloud Backup",
+          "mode": "direct",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "open_gdrive_restore_select",
+          "label": "Restore Select Backup",
+          "mode": "menu",
+          "style": "danger",
+          "target_menu": "50"
+        },
+        {
+          "id": "open_gdrive_delete_backup",
+          "label": "Delete Cloud Backup",
+          "mode": "menu",
+          "style": "danger",
+          "target_menu": "51"
+        }
+      ]
+    },
+    {
+      "id": "47",
+      "label": "Cloudflare R2",
+      "description": "Cloudflare R2:\n- cocok untuk backup server\n- setup awal via key API\n- lebih native untuk object storage di VPS\n- restore penuh akan menimpa runtime aktif",
+      "hidden": true,
+      "parent_menu": "45",
+      "actions": [
+        {
+          "id": "open_r2_setup",
+          "label": "Setup",
+          "mode": "menu",
+          "style": "secondary",
+          "target_menu": "49"
+        },
+        {
+          "id": "r2_status",
+          "label": "Status Config",
+          "mode": "direct",
+          "style": "primary"
+        },
+        {
+          "id": "r2_test_remote",
+          "label": "Test Remote",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "r2_create_upload",
+          "label": "Create & Upload Backup",
+          "mode": "direct",
+          "style": "secondary",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "r2_list_backups",
+          "label": "List Cloud Backups",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "r2_restore_latest",
+          "label": "Restore Latest Cloud Backup",
+          "mode": "direct",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true
+        },
+        {
+          "id": "open_r2_restore_select",
+          "label": "Restore Select Backup",
+          "mode": "menu",
+          "style": "danger",
+          "target_menu": "52"
+        },
+        {
+          "id": "open_r2_delete_backup",
+          "label": "Delete Cloud Backup",
+          "mode": "menu",
+          "style": "danger",
+          "target_menu": "53"
+        }
+      ]
+    },
+    {
+      "id": "48",
+      "label": "Google Drive Setup",
+      "description": "Setup Google Drive lewat 2 opsi:\n1. Termux langsung\n2. VPS + SSH tunnel\n\nSetelah JSON auth didapat, tempel lewat menu Paste JSON Auth Google.\n\nDefault target:\n- Remote Name : gdrive\n- Folder Name : autoscript-backups",
+      "hidden": true,
+      "parent_menu": "46",
+      "actions": [
+        {
+          "id": "gdrive_show_oauth_steps",
+          "label": "Tutorial Setup",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "gdrive_paste_oauth_token",
+          "label": "Paste JSON Auth Google",
+          "mode": "modal",
+          "style": "primary",
+          "modal": {
+            "title": "Paste JSON Auth Google Drive",
+            "fields": [
+              {
+                "id": "remote_name",
+                "label": "Remote Name",
+                "style": "short",
+                "required": false,
+                "placeholder": "default: gdrive"
+              },
+              {
+                "id": "folder_name",
+                "label": "Folder Name",
+                "style": "short",
+                "required": false,
+                "placeholder": "default: autoscript-backups"
+              },
+              {
+                "id": "token_json",
+                "label": "JSON Auth Google",
+                "style": "short",
+                "required": true,
+                "placeholder": "paste JSON auth satu baris"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "gdrive_use_existing_remote",
+          "label": "Use Existing Remote",
+          "mode": "direct",
+          "style": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "49",
+      "label": "Cloudflare R2 Setup",
+      "description": "Setup default:\n- Remote Name : r2\n- Bucket Name : autoscript\n\nTutorial setup Cloudflare R2:\n1. Siapkan Account ID, Bucket Name, Access Key ID, dan Secret Access Key.\n2. Quick Setup R2 untuk isi semua data.\n3. Setelah valid, backup akan aktif ke target R2.",
+      "hidden": true,
+      "parent_menu": "47",
+      "actions": [
+        {
+          "id": "r2_setup_help",
+          "label": "Tutorial Setup",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "r2_quick_setup",
+          "label": "Quick Setup R2",
+          "mode": "modal",
+          "style": "primary",
+          "modal": {
+            "title": "Quick Setup Cloudflare R2",
+            "fields": [
+              {
+                "id": "remote_name",
+                "label": "Remote Name",
+                "style": "short",
+                "required": false,
+                "placeholder": "default: r2"
+              },
+              {
+                "id": "account_id",
+                "label": "Account ID",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 437232799e..."
+              },
+              {
+                "id": "bucket_name",
+                "label": "Bucket Name",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: autoscript"
+              },
+              {
+                "id": "access_key_id",
+                "label": "Access Key ID",
+                "style": "short",
+                "required": true,
+                "placeholder": "paste Access Key ID"
+              },
+              {
+                "id": "secret_access_key",
+                "label": "Secret Access Key",
+                "style": "short",
+                "required": true,
+                "placeholder": "paste Secret Access Key"
+              }
+            ]
+          },
+          "dangerous": true
+        },
+        {
+          "id": "r2_manual_rclone_config",
+          "label": "Manual rclone config",
+          "mode": "direct",
+          "style": "secondary"
+        }
+      ]
+    },
+    {
+      "id": "50",
+      "label": "Google Drive Restore Select",
+      "description": "Restore Select Backup:\n1. Tekan List Cloud Backups dulu.\n2. Catat NO dan nama file backup yang ingin dipakai.\n3. Tekan Input Backup NO lalu masukkan nomor dari daftar.",
+      "hidden": true,
+      "parent_menu": "46",
+      "actions": [
+        {
+          "id": "gdrive_list_backups",
+          "label": "List Cloud Backups",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "gdrive_restore_select",
+          "label": "Input Backup NO",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true,
+          "modal": {
+            "title": "Restore Selected Google Drive Backup",
+            "fields": [
+              {
+                "id": "archive_no",
+                "label": "Backup NO",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 1"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "51",
+      "label": "Google Drive Delete Backup",
+      "description": "Delete Cloud Backup:\n1. Tekan List Cloud Backups dulu.\n2. Pastikan NO dan nama file backup yang ingin dihapus.\n3. Tekan Input Backup NO lalu masukkan nomor dari daftar.",
+      "hidden": true,
+      "parent_menu": "46",
+      "actions": [
+        {
+          "id": "gdrive_list_backups",
+          "label": "List Cloud Backups",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "gdrive_delete_backup",
+          "label": "Input Backup NO",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true,
+          "modal": {
+            "title": "Delete Google Drive Backup",
+            "fields": [
+              {
+                "id": "archive_no",
+                "label": "Backup NO",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 1"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "52",
+      "label": "Cloudflare R2 Restore Select",
+      "description": "Restore Select Backup:\n1. Tekan List Cloud Backups dulu.\n2. Catat NO dan nama file backup yang ingin dipakai.\n3. Tekan Input Backup NO lalu masukkan nomor dari daftar.",
+      "hidden": true,
+      "parent_menu": "47",
+      "actions": [
+        {
+          "id": "r2_list_backups",
+          "label": "List Cloud Backups",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "r2_restore_select",
+          "label": "Input Backup NO",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true,
+          "modal": {
+            "title": "Restore Selected Cloudflare R2 Backup",
+            "fields": [
+              {
+                "id": "archive_no",
+                "label": "Backup NO",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 1"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "53",
+      "label": "Cloudflare R2 Delete Backup",
+      "description": "Delete Cloud Backup:\n1. Tekan List Cloud Backups dulu.\n2. Pastikan NO dan nama file backup yang ingin dihapus.\n3. Tekan Input Backup NO lalu masukkan nomor dari daftar.",
+      "hidden": true,
+      "parent_menu": "47",
+      "actions": [
+        {
+          "id": "r2_list_backups",
+          "label": "List Cloud Backups",
+          "mode": "direct",
+          "style": "secondary"
+        },
+        {
+          "id": "r2_delete_backup",
+          "label": "Input Backup NO",
+          "mode": "modal",
+          "style": "danger",
+          "confirm": true,
+          "dangerous": true,
+          "modal": {
+            "title": "Delete Cloudflare R2 Backup",
+            "fields": [
+              {
+                "id": "archive_no",
+                "label": "Backup NO",
+                "style": "short",
+                "required": true,
+                "placeholder": "contoh: 1"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
