@@ -153,65 +153,11 @@ setup_set_progress() {
   printf '%s\n' "${label}" > "${SETUP_PROGRESS_FILE}"
 }
 
-# Checkpoint instalasi: langkah hanya ditandai selesai setelah exit code 0.
-# Fingerprint mengikat checkpoint ke source, domain, dan pilihan runtime.
-SETUP_CHECKPOINT_DIR="/var/lib/autoscript/setup"
-SETUP_CHECKPOINT_FILE="${SETUP_CHECKPOINT_DIR}/completed.steps"
-SETUP_CHECKPOINT_FINGERPRINT="${SETUP_CHECKPOINT_DIR}/source.fingerprint"
-SETUP_CHECKPOINT_COMPLETE="${SETUP_CHECKPOINT_DIR}/complete"
-
-setup_checkpoint_fingerprint() {
-  local source_hash context_hash
-  source_hash="$(
-    find "${SCRIPT_DIR}" -type f -name '*.sh' ! -path '*/.git/*' -print0 \
-      | sort -z | xargs -0r sha256sum | sha256sum | awk '{print $1}'
-  )"
-  context_hash="$(
-    printf '%s\n' "${DOMAIN:-}" "${EDGE_PROVIDER:-}" \
-      "${EDGE_ACTIVATE_RUNTIME:-}" "${ACME_CERT_MODE:-}" \
-      | sha256sum | awk '{print $1}'
-  )"
-  printf '%s:%s\n' "${source_hash}" "${context_hash}"
-}
-
-setup_checkpoint_prepare() {
-  local current previous
-  install -d -o root -g root -m 0700 "${SETUP_CHECKPOINT_DIR}"
-  current="$(setup_checkpoint_fingerprint)"
-  previous="$(cat "${SETUP_CHECKPOINT_FINGERPRINT}" 2>/dev/null || true)"
-
-  if [[ "${SETUP_FRESH:-0}" == "1" || -z "${previous}" || "${current}" != "${previous}" || -e "${SETUP_CHECKPOINT_COMPLETE}" ]]; then
-    rm -f "${SETUP_CHECKPOINT_FILE}" "${SETUP_CHECKPOINT_COMPLETE}"
-    printf '%s\n' "${current}" > "${SETUP_CHECKPOINT_FINGERPRINT}.tmp"
-    install -o root -g root -m 0600 "${SETUP_CHECKPOINT_FINGERPRINT}.tmp" "${SETUP_CHECKPOINT_FINGERPRINT}"
-    rm -f "${SETUP_CHECKPOINT_FINGERPRINT}.tmp"
-    if [[ "${SETUP_FRESH:-0}" == "1" ]]; then
-      log "Checkpoint direset sesuai SETUP_FRESH=1."
-    elif [[ -n "${previous}" && "${current}" != "${previous}" ]]; then
-      log "Source/konfigurasi berubah; checkpoint lama direset."
-    fi
-  fi
-  touch "${SETUP_CHECKPOINT_FILE}"
-  chmod 0600 "${SETUP_CHECKPOINT_FILE}"
-}
-
-setup_checkpoint_mark_complete() {
-  printf 'completed_at=%s\n' "$(date -Is)" > "${SETUP_CHECKPOINT_COMPLETE}"
-  chmod 0600 "${SETUP_CHECKPOINT_COMPLETE}"
-}
-
 setup_run_step() {
   local label="$1"
   shift || true
-  if [[ -f "${SETUP_CHECKPOINT_FILE}" ]] && grep -Fqx -- "${label}" "${SETUP_CHECKPOINT_FILE}"; then
-    ok "Lewati langkah yang sudah berhasil: ${label}"
-    setup_set_progress "${label} (sudah selesai)"
-    return 0
-  fi
-
   setup_set_progress "${label}"
   "$@"
-  printf '%s\n' "${label}" >> "${SETUP_CHECKPOINT_FILE}"
 }
 
 # Bersihkan sisa IP License Guard dari instalasi versi lama.
@@ -333,7 +279,6 @@ setup_post_domain_main() {
   if [[ "${SETUP_SKIP_MANAGE_SYNC:-0}" != "1" ]]; then
     setup_run_step "Sinkron modul manage" sync_manage_modules_layout
   fi
-  setup_checkpoint_mark_complete
 }
 
 setup_run_post_domain_with_spinner() {
@@ -355,8 +300,6 @@ setup_run_post_domain_with_spinner() {
   ui_section_title "Proses setup berjalan di latar belakang."
   ui_subtle "Tunggu sampai spinner selesai. Jika gagal, potongan log terakhir akan ditampilkan."
   echo
-
-  setup_checkpoint_prepare
 
   (
     SETUP_PROGRESS_FILE="${setup_status_file}"
@@ -400,18 +343,6 @@ main() {
   install_base_deps
   persist_cloudflare_api_token
   cleanup_legacy_license_runtime
-
-  # Mode pemulihan untuk server yang instalasinya sudah mencapai Sanity Check.
-  # Hanya membangun/memasang BadVPN lalu menjalankan sanity check; tidak mengulang
-  # instalasi domain, Xray, Edge Gateway, SSH, atau portal.
-  if [[ "${SETUP_REPAIR_BADVPN_ONLY:-0}" == "1" ]]; then
-    ui_section_title "Pemulihan BadVPN UDPGW"
-    install_badvpn_udpgw_stack
-    sanity_check
-    ok "Pemulihan BadVPN dan Sanity Check selesai."
-    return 0
-  fi
-
   domain_menu_v2
   setup_run_post_domain_with_spinner
 }
