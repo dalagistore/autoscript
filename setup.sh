@@ -146,51 +146,6 @@ source_setup_module "opt/setup/install/sanity.sh"
 trap run_exit_cleanups EXIT
 
 SETUP_PROGRESS_FILE=""
-SETUP_RESUME_DIR="/var/lib/autoscript/setup-resume"
-SETUP_RESUME_FINGERPRINT=""
-
-setup_resume_clear() {
-  rm -rf -- "${SETUP_RESUME_DIR}"
-  install -d -o root -g root -m 0700 "${SETUP_RESUME_DIR}"
-}
-
-setup_resume_prepare() {
-  install -d -o root -g root -m 0700 "${SETUP_RESUME_DIR}"
-  # A completed prior installation starts a new explicit run. A failed run
-  # keeps its successful-step markers and can continue from the failure.
-  if [[ "${SETUP_FRESH:-0}" == "1" || -f "${SETUP_RESUME_DIR}/complete" ]]; then
-    setup_resume_clear
-  fi
-}
-
-setup_resume_bind_context() {
-  local source_hash context_hash new_fingerprint old_fingerprint
-  source_hash="$(
-    find "${SCRIPT_DIR}" -type f -not -path '*/.git/*' -print0 \
-      | sort -z \
-      | xargs -0 -r sha256sum \
-      | sha256sum | awk '{print $1}'
-  )"
-  context_hash="$(printf '%s\n' "${DOMAIN:-}" "${EDGE_PROVIDER:-}" "${ACME_CERT_MODE:-}" | sha256sum | awk '{print $1}')"
-  new_fingerprint="$(printf '%s:%s\n' "${source_hash}" "${context_hash}" | sha256sum | awk '{print $1}')"
-  old_fingerprint=""
-  [[ -f "${SETUP_RESUME_DIR}/fingerprint" ]] && old_fingerprint="$(cat "${SETUP_RESUME_DIR}/fingerprint")"
-
-  if [[ -n "${old_fingerprint}" && "${old_fingerprint}" != "${new_fingerprint}" ]]; then
-    warn "Source atau konfigurasi domain berubah. Checkpoint lama direset agar tahap yang tidak cocok tidak dilewati."
-    setup_resume_clear
-  fi
-
-  SETUP_RESUME_FINGERPRINT="${new_fingerprint}"
-  printf '%s\n' "${new_fingerprint}" > "${SETUP_RESUME_DIR}/fingerprint"
-  chmod 0600 "${SETUP_RESUME_DIR}/fingerprint"
-}
-
-setup_resume_step_marker() {
-  local label="$1" key
-  key="$(printf '%s' "${label}" | sha256sum | awk '{print $1}')"
-  printf '%s/%s.done\n' "${SETUP_RESUME_DIR}" "${key}"
-}
 
 setup_set_progress() {
   local label="$1"
@@ -198,23 +153,65 @@ setup_set_progress() {
   printf '%s\n' "${label}" > "${SETUP_PROGRESS_FILE}"
 }
 
-setup_run_step() {
-  local label="$1" marker
-  shift || true
-  marker="$(setup_resume_step_marker "${label}")"
+# Checkpoint instalasi: langkah hanya ditandai selesai setelah exit code 0.
+# Fingerprint mengikat checkpoint ke source, domain, dan pilihan runtime.
+SETUP_CHECKPOINT_DIR="/var/lib/autoscript/setup"
+SETUP_CHECKPOINT_FILE="${SETUP_CHECKPOINT_DIR}/completed.steps"
+SETUP_CHECKPOINT_FINGERPRINT="${SETUP_CHECKPOINT_DIR}/source.fingerprint"
+SETUP_CHECKPOINT_COMPLETE="${SETUP_CHECKPOINT_DIR}/complete"
 
-  if [[ -f "${marker}" ]]; then
-    setup_set_progress "Lewati tahap selesai: ${label}"
-    echo "[SKIP] ${label} (checkpoint sukses)"
+setup_checkpoint_fingerprint() {
+  local source_hash context_hash
+  source_hash="$(
+    find "${SCRIPT_DIR}" -type f -name '*.sh' ! -path '*/.git/*' -print0 \
+      | sort -z | xargs -0r sha256sum | sha256sum | awk '{print $1}'
+  )"
+  context_hash="$(
+    printf '%s\n' "${DOMAIN:-}" "${EDGE_PROVIDER:-}" \
+      "${EDGE_ACTIVATE_RUNTIME:-}" "${ACME_CERT_MODE:-}" \
+      | sha256sum | awk '{print $1}'
+  )"
+  printf '%s:%s\n' "${source_hash}" "${context_hash}"
+}
+
+setup_checkpoint_prepare() {
+  local current previous
+  install -d -o root -g root -m 0700 "${SETUP_CHECKPOINT_DIR}"
+  current="$(setup_checkpoint_fingerprint)"
+  previous="$(cat "${SETUP_CHECKPOINT_FINGERPRINT}" 2>/dev/null || true)"
+
+  if [[ "${SETUP_FRESH:-0}" == "1" || -z "${previous}" || "${current}" != "${previous}" || -e "${SETUP_CHECKPOINT_COMPLETE}" ]]; then
+    rm -f "${SETUP_CHECKPOINT_FILE}" "${SETUP_CHECKPOINT_COMPLETE}"
+    printf '%s\n' "${current}" > "${SETUP_CHECKPOINT_FINGERPRINT}.tmp"
+    install -o root -g root -m 0600 "${SETUP_CHECKPOINT_FINGERPRINT}.tmp" "${SETUP_CHECKPOINT_FINGERPRINT}"
+    rm -f "${SETUP_CHECKPOINT_FINGERPRINT}.tmp"
+    if [[ "${SETUP_FRESH:-0}" == "1" ]]; then
+      log "Checkpoint direset sesuai SETUP_FRESH=1."
+    elif [[ -n "${previous}" && "${current}" != "${previous}" ]]; then
+      log "Source/konfigurasi berubah; checkpoint lama direset."
+    fi
+  fi
+  touch "${SETUP_CHECKPOINT_FILE}"
+  chmod 0600 "${SETUP_CHECKPOINT_FILE}"
+}
+
+setup_checkpoint_mark_complete() {
+  printf 'completed_at=%s\n' "$(date -Is)" > "${SETUP_CHECKPOINT_COMPLETE}"
+  chmod 0600 "${SETUP_CHECKPOINT_COMPLETE}"
+}
+
+setup_run_step() {
+  local label="$1"
+  shift || true
+  if [[ -f "${SETUP_CHECKPOINT_FILE}" ]] && grep -Fqx -- "${label}" "${SETUP_CHECKPOINT_FILE}"; then
+    ok "Lewati langkah yang sudah berhasil: ${label}"
+    setup_set_progress "${label} (sudah selesai)"
     return 0
   fi
 
   setup_set_progress "${label}"
   "$@"
-  # Marker hanya dibuat setelah fungsi tahap selesai dengan exit code 0.
-  printf '%s\\n' "${label}" > "${marker}"
-  chmod 0600 "${marker}"
-  echo "[DONE] ${label}"
+  printf '%s\n' "${label}" >> "${SETUP_CHECKPOINT_FILE}"
 }
 
 # Bersihkan sisa IP License Guard dari instalasi versi lama.
@@ -336,6 +333,7 @@ setup_post_domain_main() {
   if [[ "${SETUP_SKIP_MANAGE_SYNC:-0}" != "1" ]]; then
     setup_run_step "Sinkron modul manage" sync_manage_modules_layout
   fi
+  setup_checkpoint_mark_complete
 }
 
 setup_run_post_domain_with_spinner() {
@@ -357,6 +355,8 @@ setup_run_post_domain_with_spinner() {
   ui_section_title "Proses setup berjalan di latar belakang."
   ui_subtle "Tunggu sampai spinner selesai. Jika gagal, potongan log terakhir akan ditampilkan."
   echo
+
+  setup_checkpoint_prepare
 
   (
     SETUP_PROGRESS_FILE="${setup_status_file}"
@@ -400,12 +400,20 @@ main() {
   install_base_deps
   persist_cloudflare_api_token
   cleanup_legacy_license_runtime
-  setup_resume_prepare
+
+  # Mode pemulihan untuk server yang instalasinya sudah mencapai Sanity Check.
+  # Hanya membangun/memasang BadVPN lalu menjalankan sanity check; tidak mengulang
+  # instalasi domain, Xray, Edge Gateway, SSH, atau portal.
+  if [[ "${SETUP_REPAIR_BADVPN_ONLY:-0}" == "1" ]]; then
+    ui_section_title "Pemulihan BadVPN UDPGW"
+    install_badvpn_udpgw_stack
+    sanity_check
+    ok "Pemulihan BadVPN dan Sanity Check selesai."
+    return 0
+  fi
+
   domain_menu_v2
-  setup_resume_bind_context
   setup_run_post_domain_with_spinner
-  printf '%s\\n' "complete" > "${SETUP_RESUME_DIR}/complete"
-  chmod 0600 "${SETUP_RESUME_DIR}/complete"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
