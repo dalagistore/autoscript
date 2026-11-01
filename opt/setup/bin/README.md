@@ -1,0 +1,23 @@
+# opt/setup/bin
+
+Script executable yang sebelumnya dihasilkan dari heredoc di `setup.sh`
+dipindah ke folder ini secara bertahap.
+
+Yang sudah dipindah:
+- `sshws-qac-enforcer.py`
+- `xray-session.py`
+- `xray-speed.py`
+- `xray-warp-sync.py`
+- `xray-domain-guard`
+
+Komponen Go yang sekarang juga aktif:
+- `opt/edge/go/cmd/wsproxy` (`Websocket Proxy (Go)`)
+
+Kandidat berikutnya bila masih ada script inline baru:
+- utility Python/Bash tambahan yang saat ini masih dibuat langsung dari `setup.sh`
+
+Catatan:
+- file di sini adalah source repo
+- saat provisioning, `setup.sh` menyalin/menaruhnya ke path runtime seperti
+  `/usr/local/bin/...`
+- setelah dipindah, file-file ini bisa diuji langsung tanpa ekstraksi heredoc
