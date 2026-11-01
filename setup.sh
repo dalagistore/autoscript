@@ -146,6 +146,51 @@ source_setup_module "opt/setup/install/sanity.sh"
 trap run_exit_cleanups EXIT
 
 SETUP_PROGRESS_FILE=""
+SETUP_RESUME_DIR="/var/lib/autoscript/setup-resume"
+SETUP_RESUME_FINGERPRINT=""
+
+setup_resume_clear() {
+  rm -rf -- "${SETUP_RESUME_DIR}"
+  install -d -o root -g root -m 0700 "${SETUP_RESUME_DIR}"
+}
+
+setup_resume_prepare() {
+  install -d -o root -g root -m 0700 "${SETUP_RESUME_DIR}"
+  # A completed prior installation starts a new explicit run. A failed run
+  # keeps its successful-step markers and can continue from the failure.
+  if [[ "${SETUP_FRESH:-0}" == "1" || -f "${SETUP_RESUME_DIR}/complete" ]]; then
+    setup_resume_clear
+  fi
+}
+
+setup_resume_bind_context() {
+  local source_hash context_hash new_fingerprint old_fingerprint
+  source_hash="$(
+    find "${SCRIPT_DIR}" -type f -not -path '*/.git/*' -print0 \
+      | sort -z \
+      | xargs -0 -r sha256sum \
+      | sha256sum | awk '{print $1}'
+  )"
+  context_hash="$(printf '%s\n' "${DOMAIN:-}" "${EDGE_PROVIDER:-}" "${ACME_CERT_MODE:-}" | sha256sum | awk '{print $1}')"
+  new_fingerprint="$(printf '%s:%s\n' "${source_hash}" "${context_hash}" | sha256sum | awk '{print $1}')"
+  old_fingerprint=""
+  [[ -f "${SETUP_RESUME_DIR}/fingerprint" ]] && old_fingerprint="$(cat "${SETUP_RESUME_DIR}/fingerprint")"
+
+  if [[ -n "${old_fingerprint}" && "${old_fingerprint}" != "${new_fingerprint}" ]]; then
+    warn "Source atau konfigurasi domain berubah. Checkpoint lama direset agar tahap yang tidak cocok tidak dilewati."
+    setup_resume_clear
+  fi
+
+  SETUP_RESUME_FINGERPRINT="${new_fingerprint}"
+  printf '%s\n' "${new_fingerprint}" > "${SETUP_RESUME_DIR}/fingerprint"
+  chmod 0600 "${SETUP_RESUME_DIR}/fingerprint"
+}
+
+setup_resume_step_marker() {
+  local label="$1" key
+  key="$(printf '%s' "${label}" | sha256sum | awk '{print $1}')"
+  printf '%s/%s.done\n' "${SETUP_RESUME_DIR}" "${key}"
+}
 
 setup_set_progress() {
   local label="$1"
@@ -154,10 +199,22 @@ setup_set_progress() {
 }
 
 setup_run_step() {
-  local label="$1"
+  local label="$1" marker
   shift || true
+  marker="$(setup_resume_step_marker "${label}")"
+
+  if [[ -f "${marker}" ]]; then
+    setup_set_progress "Lewati tahap selesai: ${label}"
+    echo "[SKIP] ${label} (checkpoint sukses)"
+    return 0
+  fi
+
   setup_set_progress "${label}"
   "$@"
+  # Marker hanya dibuat setelah fungsi tahap selesai dengan exit code 0.
+  printf '%s\\n' "${label}" > "${marker}"
+  chmod 0600 "${marker}"
+  echo "[DONE] ${label}"
 }
 
 # Bersihkan sisa IP License Guard dari instalasi versi lama.
@@ -343,8 +400,12 @@ main() {
   install_base_deps
   persist_cloudflare_api_token
   cleanup_legacy_license_runtime
+  setup_resume_prepare
   domain_menu_v2
+  setup_resume_bind_context
   setup_run_post_domain_with_spinner
+  printf '%s\\n' "complete" > "${SETUP_RESUME_DIR}/complete"
+  chmod 0600 "${SETUP_RESUME_DIR}/complete"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
