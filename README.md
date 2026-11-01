@@ -1,46 +1,53 @@
 # Autoscript
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Platform-Linux-0f172a?style=for-the-badge&logo=linux&logoColor=white" alt="Linux">
-  <img src="https://img.shields.io/badge/Core-Xray-111827?style=for-the-badge&logo=radar&logoColor=white" alt="Xray">
-  <img src="https://img.shields.io/badge/Edge-Go%20edge--mux-0b5fff?style=for-the-badge&logo=go&logoColor=white" alt="Go edge-mux">
-  <img src="https://img.shields.io/badge/Remote-Telegram-229ED9?style=for-the-badge&logo=telegram&logoColor=white" alt="Telegram">
-  <img src="https://img.shields.io/badge/WARP-Cloudflare-F38020?style=for-the-badge&logo=cloudflare&logoColor=white" alt="Cloudflare WARP">
-</p>
+## Features
 
-<p align="center">
-  <img src="https://img.shields.io/badge/Manage-CLI-1f2937?style=flat-square&logo=gnubash&logoColor=white" alt="Manage CLI">
-  <img src="https://img.shields.io/badge/Portal-Account-2563eb?style=flat-square&logo=vercel&logoColor=white" alt="Account Portal">
-  <img src="https://img.shields.io/badge/Access-SSH%2FWebSocket-0ea5e9?style=flat-square&logo=protonvpn&logoColor=white" alt="SSH WebSocket">
-  <img src="https://img.shields.io/badge/Utility-BadVPN-475569?style=flat-square&logo=wireguard&logoColor=white" alt="BadVPN">
-  <img src="https://img.shields.io/badge/Support-Backup%20%26%20Restore-0f766e?style=flat-square&logo=icloud&logoColor=white" alt="Backup and Restore">
-  <img src="https://img.shields.io/badge/Zero%20Trust-Cloudflare%20WARP-F38020?style=flat-square&logo=cloudflare&logoColor=white" alt="Cloudflare WARP">
-</p>
+| Category    | Features                                                                          |
+| ----------- | --------------------------------------------------------------------------------- |
+| SSH WS      | OpenSSH, Dropbear, SSH WS, SSH SSL WS, Enhanced Payload, UDP Custom, BadVPN UDPGW |
+| XRAY Core   | VMess, VLESS, Trojan, Shadowsocks, gRPC, NGINX Reverse Proxy, Auto SSL            |
+| WireGuard   | WireGuard VPN, Client Generator, QR Code                                          |
+| UDP Tunnel  | UDP Custom, ZIVPN UDP, BadVPN UDPGW                                               |
+| Management  | Backup, Domain Manager, Speedtest, Service Checker, Traffic Monitor               |
+| Dashboard   | Interactive Panel, Service Status, User Statistics, Traffic Statistics            |
+| Go Services | Native Dropbear WS, Native Stunnel WS, Multi-Connection Support                   |
 
-## Fokus
+---
 
-- `autoscript` = repo utama untuk stack VPS lengkap
-- `run.sh` = bootstrap host
-- `manage` = panel operasi harian
-- `Xray`, `SSH/WebSocket`, `BadVPN`, `WARP`
-- `Account Portal`, `Bot Telegram`, `Backup/Restore`, `Domain Guard`, `Uninstall`
+Open menu:
 
+```bash
+manage
+```
+
+---
 
 ## Quick Install
 
+> Note: This script must be run as root!
+
 ```bash
-1. Instalasi langsung (disarankan)
-Pada VPS baru Debian 12, login sebagai root, lalu jalankan:
-apt update && apt install -y curl git && apt install -y curl wget git unzip zip tar rsync sudo jq python3
+# update
+apt update -y && apt upgrade -y
+apt install git curl screen sudo -y
+apt install -y curl wget git unzip zip tar rsync sudo jq python3
+
+# disable ipv6
+sysctl -w net.ipv6.conf.all.disable_ipv6=1
+sysctl -w net.ipv6.conf.default.disable_ipv6=1
+
+# quick install
 bash <(curl -fsSL https://raw.githubusercontent.com/dalagistore/autoscript/main/run.sh)
 
-2. Jika ingin clone repository secara manual
-Gunakan cara ini jika ingin melihat atau mengelola source terlebih dahulu:
+# clone the repos
 git clone https://github.com/dalagistore/autoscript.git
 cd autoscript
-Kemudian jalankan:
+
+# run main installer
 bash run.sh
+
 ```
+---
 ## Arsitektur Singkat
 
 ```text
