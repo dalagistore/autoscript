@@ -1,0 +1,275 @@
+from __future__ import annotations
+
+import base64
+import html
+import re
+from datetime import datetime, timezone
+
+from .backend_client import BackendActionResponse
+from .commands_loader import ActionSpec, FieldSpec, MenuSpec
+from .redaction import mask_secret, sanitize_secret_text
+
+
+SENSITIVE_KEY_RE = re.compile(r"(token|secret|password|license|api[_-]?key|authorization)", re.IGNORECASE)
+NON_PASSWORD_SENSITIVE_KEY_RE = re.compile(r"(token|secret|license|api[_-]?key|authorization)", re.IGNORECASE)
+PASSWORD_KEY_RE = re.compile(r"password", re.IGNORECASE)
+KV_SECRET_RE = re.compile(
+    r"(?im)^([A-Za-z0-9_ -]*(?:token|secret|password|license(?:[_-]?key)?|api[_-]?key|authorization)[A-Za-z0-9_ -]*)(\s*)([:=])(\s*)([^\n]*)$"
+)
+ACCOUNT_INFO_URI_RE = re.compile(r"(?im)^\s*((?:vless|vmess|trojan)://\S+)\s*$")
+ACCOUNT_INFO_FIELD_RE = re.compile(r"^(\s*(?:Username|Password)\s*:\s*)(.+?)\s*$")
+ACCOUNT_INFO_PAYLOAD_LABEL_RE = re.compile(r"^\s*Payload(?:\s+[A-Z0-9/_-]+)?\s*:\s*$", re.IGNORECASE)
+ACCOUNT_INFO_HTTP_URL_RE = re.compile(r"(?im)^\s*(https?://\S+)\s*$")
+
+
+def now_utc_text() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+
+
+def _trim(text: str, max_len: int) -> str:
+    if len(text) <= max_len:
+        return text
+    if max_len < 4:
+        return text[:max_len]
+    return text[: max_len - 3] + "..."
+
+
+def as_pre(text: str, max_len: int = 3300) -> str:
+    return f"<pre>{html.escape(_trim(text, max_len))}</pre>"
+
+
+def _sanitize_output_text(value: str, *, allow_password: bool = False) -> str:
+    text = sanitize_secret_text(value)
+
+    def _mask_kv(match: re.Match[str]) -> str:
+        key = match.group(1)
+        key_gap = match.group(2)
+        sep = match.group(3)
+        value_gap = match.group(4)
+        val = match.group(5)
+        if allow_password and PASSWORD_KEY_RE.search(key) and not NON_PASSWORD_SENSITIVE_KEY_RE.search(key):
+            return f"{key}{key_gap}{sep}{value_gap}{val}"
+        return f"{key}{key_gap}{sep}{value_gap}{mask_secret(val)}"
+
+    return KV_SECRET_RE.sub(_mask_kv, text)
+
+
+def _mask_param_if_sensitive(key: str, value: str, *, allow_password: bool = False) -> str:
+    if allow_password and PASSWORD_KEY_RE.search(key) and not NON_PASSWORD_SENSITIVE_KEY_RE.search(key):
+        return _sanitize_output_text(value, allow_password=allow_password)
+    if SENSITIVE_KEY_RE.search(key):
+        return mask_secret(value)
+    return _sanitize_output_text(value, allow_password=allow_password)
+
+
+def main_menu_text(hostname: str, menu_count: int, header_text: str = "") -> str:
+    lines = [
+        "<b>AUTOSCRIPT TELEGRAM CONTROL</b>",
+        "Panel mobile untuk kontrol VPS.",
+        "",
+    ]
+    header = str(header_text or "").strip()
+    if header:
+        lines.append(html.escape(_trim(header, 1800)))
+        lines.append("")
+    lines.extend(
+        [
+            f"• Host: <code>{html.escape(hostname)}</code>",
+            f"• Kategori aktif: <code>{menu_count}</code>",
+            f"• Updated: <code>{now_utc_text()}</code>",
+            "",
+            "Pilih kategori di bawah:",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def menu_text(menu: MenuSpec, page: int, total_pages: int) -> str:
+    lines = [
+        f"<b>{html.escape(menu.label)}</b>",
+    ]
+    if menu.description:
+        lines.append(html.escape(menu.description))
+    lines.append("")
+    lines.append(f"Halaman aksi <code>{page + 1}/{max(total_pages, 1)}</code>")
+    lines.append("Pilih action:")
+    return "\n".join(lines)
+
+
+def _target_identity(menu: MenuSpec, params: dict[str, str] | None = None) -> str:
+    payload = params if isinstance(params, dict) else {}
+    username = str(payload.get("username") or "").strip()
+    proto = str(payload.get("proto") or "").strip().lower()
+
+    if menu.id == "24" and username and proto:
+        return f"{username}@{proto}"
+    if menu.id in {"25", "44"} and username:
+        return username
+    return ""
+
+
+def action_form_prompt(
+    menu: MenuSpec,
+    action: ActionSpec,
+    field: FieldSpec,
+    idx: int,
+    total: int,
+    *,
+    params: dict[str, str] | None = None,
+) -> str:
+    lines = [
+        f"<b>{html.escape(menu.label)} · {html.escape(action.label)}</b>",
+        f"Input <code>{idx}/{total}</code>",
+        "",
+    ]
+    target = _target_identity(menu, params)
+    if target:
+        lines.extend(
+            [
+                f"User: <code>{html.escape(target)}</code>",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            f"Field: <code>{html.escape(field.id)}</code>",
+        f"Label: {html.escape(field.label)}",
+        ]
+    )
+    if field.placeholder:
+        lines.append(f"Contoh: <code>{html.escape(field.placeholder)}</code>")
+    if field.required:
+        lines.append("Wajib diisi.")
+    else:
+        lines.append("Opsional. Isi '-' untuk skip.")
+    lines.append("")
+    lines.append("Kirim nilainya sekarang.")
+    return "\n".join(lines)
+
+
+def confirm_text(menu: MenuSpec, action: ActionSpec, params: dict[str, str]) -> str:
+    allow_password = menu.label.strip().lower().startswith("ssh users")
+    lines = [
+        f"<b>Konfirmasi: {html.escape(menu.label)} · {html.escape(action.label)}</b>",
+        "",
+    ]
+    target = _target_identity(menu, params)
+    if target:
+        lines.append(f"User: <code>{html.escape(target)}</code>")
+        lines.append("")
+
+    display_params = params
+    if menu.id in {"24", "25", "44"}:
+        display_params = {
+            key: value
+            for key, value in params.items()
+            if key not in {"proto", "username"}
+        }
+
+    if not display_params:
+        lines.append("Tanpa parameter.")
+    else:
+        lines.append(
+            as_pre(
+                "\n".join(
+                    [
+                        f"{k}={_mask_param_if_sensitive(k, v, allow_password=allow_password)}"
+                        for k, v in display_params.items()
+                    ]
+                ),
+                max_len=1200,
+            )
+        )
+    lines.append("")
+    lines.append("Lanjutkan eksekusi?")
+    return "\n".join(lines)
+
+
+def action_result_text(result: BackendActionResponse) -> str:
+    icon = "✅" if result.ok else "❌"
+    title = html.escape(result.title or "Result")
+    allow_password = bool(result.data.get("allow_sensitive_output")) if isinstance(result.data, dict) else False
+    message = _sanitize_output_text(result.message or "(no output)", allow_password=allow_password)
+    render_mode = str(result.data.get("render_mode") or "").strip().lower() if isinstance(result.data, dict) else ""
+
+    if render_mode == "account_info":
+        body_lines: list[str] = []
+        for raw_line in message.splitlines():
+            line = str(raw_line)
+            uri_match = ACCOUNT_INFO_URI_RE.match(line)
+            if uri_match:
+                body_lines.append(f"<code>{html.escape(uri_match.group(1))}</code>")
+                continue
+
+            url_match = ACCOUNT_INFO_HTTP_URL_RE.match(line)
+            if url_match:
+                url = url_match.group(1)
+                body_lines.append(f'<a href="{html.escape(url, quote=True)}">{html.escape(url)}</a>')
+                continue
+
+            field_match = ACCOUNT_INFO_FIELD_RE.match(line)
+            if field_match:
+                body_lines.append(
+                    f"{html.escape(field_match.group(1))}<code>{html.escape(field_match.group(2))}</code>"
+                )
+                continue
+
+            if ACCOUNT_INFO_PAYLOAD_LABEL_RE.match(line) or line.startswith("    "):
+                body_lines.append(f"<code>{html.escape(line)}</code>")
+                continue
+
+            if line:
+                body_lines.append(html.escape(line))
+            else:
+                body_lines.append("")
+
+        lines = [
+            f"<b>{icon} {title}</b>",
+            f"Code: <code>{html.escape(result.code)}</code>",
+            "",
+            *body_lines,
+        ]
+        return "\n".join(lines)
+
+    lines = [
+        f"<b>{icon} {title}</b>",
+        f"Code: <code>{html.escape(result.code)}</code>",
+        "",
+        as_pre(message, max_len=3300),
+    ]
+    return "\n".join(lines)
+
+
+def decode_download_payload(data: dict) -> tuple[str, bytes] | None:
+    raw = data.get("download_file")
+    if not isinstance(raw, dict):
+        return None
+
+    filename = str(raw.get("filename") or "download.txt")
+    content_base64 = str(raw.get("content_base64") or "")
+    if not content_base64:
+        return None
+
+    try:
+        payload = base64.b64decode(content_base64, validate=True)
+    except Exception:
+        return None
+
+    return filename, payload
+
+
+def sanitize_download_attachment(
+    filename: str,
+    payload: bytes,
+    *,
+    allow_password: bool = False,
+) -> tuple[str, bytes]:
+    try:
+        text = payload.decode("utf-8")
+    except Exception:
+        return filename, payload
+
+    sanitized = _sanitize_output_text(text, allow_password=allow_password)
+    if sanitized == text:
+        return filename, payload
+    return filename, sanitized.encode("utf-8")
