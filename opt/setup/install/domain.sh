@@ -771,6 +771,76 @@ domain_menu_v2() {
   ok "Mode cert: dns_cf wildcard"
 }
 
+acme_selected_server() {
+  local staging="${DLGST_ACME_STAGING:-0}"
+  case "${staging,,}" in
+    1|true|yes|on) printf '%s\n' "letsencrypt_test" ;;
+    *) printf '%s\n' "${ACME_DEFAULT_CA:-letsencrypt}" ;;
+  esac
+}
+
+acme_report_issue_failure() {
+  local log_file="$1" domain="${DOMAIN:-domain}" retry="" retry_wib=""
+  if grep -Eqi 'rateLimited|too many certificates|429' "${log_file}"; then
+    retry="$(sed -nE 's/.*retry after ([0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}) UTC.*/\1 UTC/p' "${log_file}" | tail -n1)"
+    echo "[ERROR] Let's Encrypt menolak penerbitan ${domain}: batas penerbitan sertifikat (HTTP 429)." >&2
+    if [[ -n "${retry}" ]]; then
+      if command -v date >/dev/null 2>&1; then
+        retry_wib="$(TZ=Asia/Jakarta date -d "${retry}" '+%Y-%m-%d %H:%M:%S WIB' 2>/dev/null || true)"
+      fi
+      echo "[INFO] Waktu coba kembali dari CA: ${retry}${retry_wib:+ ( ${retry_wib} )}." >&2
+    else
+      echo "[INFO] Tunggu hingga jendela rate limit CA berakhir sebelum mencoba lagi." >&2
+    fi
+    echo "[INFO] Jangan mengulang setup atau memakai --force berulang kali." >&2
+    echo "[INFO] Untuk uji installer gunakan DLGST_ACME_STAGING=1; sertifikat staging tidak dipercaya browser." >&2
+  elif grep -Eqi 'connection refused|timeout|timed out|connection reset' "${log_file}"; then
+    echo "[ERROR] Validasi ACME gagal karena koneksi/port. Periksa DNS A/AAAA, firewall, dan akses TCP port 80 dari internet." >&2
+  elif grep -Eqi 'unauthorized|invalid response|NXDOMAIN|SERVFAIL' "${log_file}"; then
+    echo "[ERROR] Validasi domain ACME ditolak. Periksa DNS domain dan pastikan domain mengarah ke VPS ini." >&2
+  else
+    echo "[ERROR] Penerbitan sertifikat ACME gagal. Potongan log ACME:" >&2
+    tail -n 35 "${log_file}" >&2
+  fi
+}
+
+acme_issue_logged() {
+  local log_file server rc
+  log_file="$(mktemp)" || die "Gagal membuat log sementara ACME."
+  server="$(acme_selected_server)"
+  ok "ACME CA: ${server}"
+  if /root/.acme.sh/acme.sh "$@" --server "${server}" >"${log_file}" 2>&1; then
+    cat "${log_file}"
+    rm -f "${log_file}"
+    return 0
+  else
+    rc=$?
+    cat "${log_file}" >&2
+    acme_report_issue_failure "${log_file}"
+    rm -f "${log_file}"
+    return "${rc:-1}"
+  fi
+}
+
+acme_restore_issued_cert_from_home() {
+  local domain="${DOMAIN:-}" candidate_dir candidate_cert candidate_key
+  [[ -n "${domain}" ]] || return 1
+  for candidate_dir in "/root/.acme.sh/${domain}_ecc" "/root/.acme.sh/${domain}"; do
+    candidate_cert="${candidate_dir}/fullchain.cer"
+    candidate_key="${candidate_dir}/${domain}.key"
+    [[ -s "${candidate_cert}" && -s "${candidate_key}" ]] || continue
+    openssl x509 -in "${candidate_cert}" -noout -checkend 86400 >/dev/null 2>&1 || continue
+    openssl x509 -in "${candidate_cert}" -noout -checkhost "${domain}" >/dev/null 2>&1 || continue
+    install -d -m 700 "${CERT_DIR}"
+    install -m 600 "${candidate_cert}" "${CERT_FULLCHAIN}" || return 1
+    install -m 600 "${candidate_key}" "${CERT_PRIVKEY}" || return 1
+    acme_existing_cert_usable || return 1
+    ok "Sertifikat ACME yang sudah pernah diterbitkan ditemukan dan dipulihkan untuk ${domain}."
+    return 0
+  done
+  return 1
+}
+
 acme_existing_cert_usable() {
   local cert="${CERT_FULLCHAIN:-}"
   local key="${CERT_PRIVKEY:-}"
@@ -809,7 +879,7 @@ install_acme_and_issue_cert() {
 
   # Hindari meminta sertifikat baru jika sertifikat yang terpasang masih valid.
   # Ini juga mencegah kegagalan Let's Encrypt HTTP-01 rate limit saat setup ulang.
-  if acme_existing_cert_usable; then
+  if acme_existing_cert_usable || acme_restore_issued_cert_from_home; then
     ok "Sertifikat existing untuk ${DOMAIN} masih valid dan private key cocok."
     ok "Gunakan sertifikat yang sudah ada; lewati penerbitan ACME baru."
     reuse_existing_cert=1
@@ -856,7 +926,7 @@ install_acme_and_issue_cert() {
     fi
 
     export PATH="/root/.acme.sh:$PATH"
-    /root/.acme.sh/acme.sh --set-default-ca --server "${ACME_DEFAULT_CA}" >/dev/null 2>&1 || true
+    /root/.acme.sh/acme.sh --set-default-ca --server "$(acme_selected_server)" >/dev/null 2>&1 || true
 
     if [[ "${ACME_CERT_MODE}" == "dns_cf_wildcard" ]]; then
       ok "Issue wildcard cert via dns_cf..."
@@ -867,9 +937,9 @@ install_acme_and_issue_cert() {
       [[ -n "${CF_ACCOUNT_ID:-}" ]] && export CF_Account_ID="${CF_ACCOUNT_ID}"
       [[ -n "${CF_ZONE_ID:-}" ]] && export CF_Zone_ID="${CF_ZONE_ID}"
 
-      /root/.acme.sh/acme.sh --issue --force --dns dns_cf \
+      acme_issue_logged --issue --dns dns_cf \
         -d "${DOMAIN}" -d "*.${DOMAIN}" \
-        || die "Gagal issue sertifikat wildcard via dns_cf (pastikan token Cloudflare valid)."
+        || die "Penerbitan sertifikat wildcard gagal. Periksa token Cloudflare, DNS, atau pesan rate limit di atas."
 
       /root/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" \
         --key-file "${CERT_PRIVKEY}" \
@@ -878,8 +948,8 @@ install_acme_and_issue_cert() {
         || die "Gagal install sertifikat wildcard ke ${CERT_DIR}."
     else
       ok "Issue cert via standalone :80..."
-      /root/.acme.sh/acme.sh --issue --force --standalone -d "${DOMAIN}" --httpport 80 \
-        || die "Gagal issue sertifikat (pastikan port 80 terbuka & DNS domain mengarah ke VPS)."
+      acme_issue_logged --issue --standalone -d "${DOMAIN}" --httpport 80 \
+        || die "Penerbitan sertifikat gagal. Lihat diagnosis ACME di atas; periksa DNS dan TCP port 80 jika bukan rate limit."
 
       /root/.acme.sh/acme.sh --install-cert -d "${DOMAIN}" \
         --key-file "${CERT_PRIVKEY}" \
