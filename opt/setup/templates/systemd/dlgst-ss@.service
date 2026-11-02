@@ -1,0 +1,20 @@
+[Unit]
+Description=DLGST Shadowsocks Account %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/ss-server -c /etc/dlgst-shadowsocks/%i.json -u --no-delay
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=65535
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/etc/dlgst-shadowsocks
+
+[Install]
+WantedBy=multi-user.target

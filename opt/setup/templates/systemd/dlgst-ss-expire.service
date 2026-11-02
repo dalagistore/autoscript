@@ -1,0 +1,6 @@
+[Unit]
+Description=DLGST Shadowsocks Expired Account Checker
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/lib/dlgst-shadowsocks/ssmanager.py expire
