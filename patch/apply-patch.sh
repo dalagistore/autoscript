@@ -4,120 +4,199 @@ set -Eeuo pipefail
 BASE="$(cd "$(dirname "$0")" && pwd)"
 PAYLOAD="$BASE/payload"
 STAMP="$(date +%Y%m%d-%H%M%S)"
-BACKUP="/root/DLGST-UPDATE-PATCH-BACKUP-$STAMP"
-MANIFEST="$BASE/SHA256SUMS"
+BACKUP="/root/DLGST-UPDATE-PATCH-FIX-BACKUP-$STAMP"
+
+SOURCE="/opt/autoscript"
+RUNTIME="/"
+
+SUCCESS=0
+
+echo "=========================================="
+echo " DLGST XRAY PANEL UPDATE PATCH FIX V1"
+echo "=========================================="
+
+[ "$(id -u)" -eq 0 ] || {
+    echo "ERROR: Jalankan sebagai root."
+    exit 1
+}
+
+[ -d "$SOURCE/.git" ] || {
+    echo "ERROR: Source /opt/autoscript tidak ditemukan."
+    exit 1
+}
 
 [ -d "$PAYLOAD/source" ] && [ -d "$PAYLOAD/runtime" ] || {
     echo "ERROR: Payload tidak lengkap."
     exit 1
 }
 
-echo "===== VALIDASI CHECKSUM ====="
+echo
+echo "===== VALIDASI SHA256 ====="
 cd "$BASE"
 sha256sum -c SHA256SUMS
 
-echo
-echo "===== BACKUP ====="
-mkdir -p "$BACKUP"
+backup_tree() {
+    local payload="$1"
+    local target="$2"
+    local backup="$3"
 
-# Backup semua target sebelum perubahan
-while IFS= read -r -d '' file; do
-    rel="${file#"$PAYLOAD/runtime"/}"
-    target="/$rel"
+    mkdir -p "$backup/files"
 
-    if [ -e "$target" ]; then
-        mkdir -p "$BACKUP/runtime/$(dirname "$rel")"
-        cp -a "$target" "$BACKUP/runtime/$rel"
-    else
-        mkdir -p "$BACKUP/missing/$(dirname "$rel")"
-        touch "$BACKUP/missing/$rel"
+    while IFS= read -r -d '' file; do
+        local rel="${file#"$payload"/}"
+        local dest="$target/$rel"
+
+        mkdir -p "$backup/files/$(dirname "$rel")"
+
+        if [ -e "$dest" ]; then
+            cp -a "$dest" "$backup/files/$rel"
+        else
+            mkdir -p "$backup/missing/$(dirname "$rel")"
+            touch "$backup/missing/$rel"
+        fi
+    done < <(find "$payload" -type f ! -path '*/web/dist/*' -print0)
+
+    if [ -d "$payload/account-portal/web/dist" ]; then
+        if [ -d "$target/account-portal/web/dist" ]; then
+            mkdir -p "$backup/dist"
+            cp -a "$target/account-portal/web/dist" "$backup/dist/"
+            touch "$backup/dist-existed"
+        fi
     fi
-done < <(find "$PAYLOAD/runtime" -type f -print0)
+}
 
-while IFS= read -r -d '' file; do
-    rel="${file#"$PAYLOAD/source"/}"
-    target="/opt/autoscript/$rel"
+deploy_tree() {
+    local payload="$1"
+    local target="$2"
 
-    if [ -e "$target" ]; then
-        mkdir -p "$BACKUP/source/$(dirname "$rel")"
-        cp -a "$target" "$BACKUP/source/$rel"
-    else
-        mkdir -p "$BACKUP/source-missing/$(dirname "$rel")"
-        touch "$BACKUP/source-missing/$rel"
+    while IFS= read -r -d '' file; do
+        local rel="${file#"$payload"/}"
+        local dest="$target/$rel"
+
+        mkdir -p "$(dirname "$dest")"
+        cp -a "$file" "$dest"
+    done < <(find "$payload" -type f ! -path '*/web/dist/*' -print0)
+
+    if [ -d "$payload/account-portal/web/dist" ]; then
+        rm -rf "$target/account-portal/web/dist"
+        mkdir -p "$target/account-portal/web"
+        cp -a "$payload/account-portal/web/dist" \
+              "$target/account-portal/web/dist"
     fi
-done < <(find "$PAYLOAD/source" -type f -print0)
+}
 
-echo "Backup: $BACKUP"
+restore_tree() {
+    local payload="$1"
+    local target="$2"
+    local backup="$3"
+
+    while IFS= read -r -d '' file; do
+        local rel="${file#"$payload"/}"
+        local dest="$target/$rel"
+
+        rm -f "$dest"
+
+        if [ -f "$backup/files/$rel" ]; then
+            mkdir -p "$(dirname "$dest")"
+            cp -a "$backup/files/$rel" "$dest"
+        fi
+    done < <(find "$payload" -type f ! -path '*/web/dist/*' -print0)
+
+    if [ -d "$payload/account-portal/web/dist" ]; then
+        rm -rf "$target/account-portal/web/dist"
+
+        if [ -f "$backup/dist-existed" ]; then
+            mkdir -p "$target/account-portal/web"
+            cp -a "$backup/dist" "$target/account-portal/web/"
+        fi
+    fi
+}
 
 rollback() {
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-        echo
-        echo "ERROR: Patch gagal. Menjalankan rollback..."
+    local rc="${1:-1}"
 
-        cp -a "$BACKUP/runtime/." / 2>/dev/null || true
-        cp -a "$BACKUP/source/." /opt/autoscript/ 2>/dev/null || true
+    echo
+    echo "===== ROLLBACK ====="
 
-        while IFS= read -r -d '' f; do
-            rel="${f#"$BACKUP/missing"/}"
-            rm -f "/$rel"
-        done < <(find "$BACKUP/missing" -type f -print0 2>/dev/null || true)
+    set +e
 
-        while IFS= read -r -d '' f; do
-            rel="${f#"$BACKUP/source-missing"/}"
-            rm -f "/opt/autoscript/$rel"
-        done < <(find "$BACKUP/source-missing" -type f -print0 2>/dev/null || true)
+    restore_tree "$PAYLOAD/runtime" "/" "$BACKUP/runtime"
+    restore_tree "$PAYLOAD/source" "$SOURCE" "$BACKUP/source"
 
-        echo "Rollback selesai. Periksa backup: $BACKUP"
-    fi
+    echo "Rollback selesai."
+    echo "Backup: $BACKUP"
+
     exit "$rc"
 }
-trap rollback EXIT
+
+echo
+echo "===== BACKUP SOURCE DAN RUNTIME ====="
+
+mkdir -p "$BACKUP"
+
+backup_tree "$PAYLOAD/source" "$SOURCE" "$BACKUP/source"
+backup_tree "$PAYLOAD/runtime" "/" "$BACKUP/runtime"
+
+echo "Backup: $BACKUP"
 
 echo
 echo "===== UPDATE SOURCE ====="
-cp -a "$PAYLOAD/source/." /opt/autoscript/
+
+deploy_tree "$PAYLOAD/source" "$SOURCE"
 
 echo
 echo "===== UPDATE RUNTIME ====="
-cp -a "$PAYLOAD/runtime/." /
+
+if [ -f "$PAYLOAD/runtime/opt/account-portal/app/data.py" ]; then
+    [ -d /opt/account-portal ] || {
+        echo "ERROR: Runtime Account Portal tidak ditemukan."
+        rollback 1
+    }
+fi
+
+deploy_tree "$PAYLOAD/runtime" "/"
 
 echo
 echo "===== PERMISSION ====="
+
 chmod 755 \
- /opt/manage/features/users/ssh_qac.sh \
- /opt/manage/features/users/ssh_users.sh \
- /opt/manage/features/users/xray_qac.sh \
- /opt/manage/features/users/xray_users.sh \
- /usr/local/lib/autoscript-setup/opt/setup/bin/badvpn-udpgw-launcher.sh \
- /usr/local/lib/autoscript-setup/opt/setup/install/management.sh
+    /opt/manage/features/users/ssh_qac.sh \
+    /opt/manage/features/users/ssh_users.sh \
+    /opt/manage/features/users/xray_qac.sh \
+    /opt/manage/features/users/xray_users.sh \
+    /usr/local/lib/autoscript-setup/opt/setup/bin/badvpn-udpgw-launcher.sh \
+    /usr/local/lib/autoscript-setup/opt/setup/install/management.sh
 
 echo
 echo "===== VERIFIKASI PORTAL ====="
+
 diff -qr \
- /opt/autoscript/account-portal/web/dist \
- /opt/account-portal/web/dist
+    "$SOURCE/account-portal/web/dist" \
+    /opt/account-portal/web/dist || rollback 1
 
 echo
-echo "===== VERIFIKASI FILE RUNTIME ====="
+echo "===== VERIFIKASI RUNTIME ====="
+
 for f in \
- /opt/account-portal/app/data.py \
- /opt/manage/features/users/ssh_qac.sh \
- /opt/manage/features/users/ssh_users.sh \
- /opt/manage/features/users/xray_qac.sh \
- /opt/manage/features/users/xray_users.sh \
- /usr/local/lib/autoscript-setup/opt/setup/bin/badvpn-udpgw-launcher.sh \
- /usr/local/lib/autoscript-setup/opt/setup/bin/sshws-control.py \
- /usr/local/lib/autoscript-setup/opt/setup/install/management.sh
+    /opt/account-portal/app/data.py \
+    /opt/manage/features/users/ssh_qac.sh \
+    /opt/manage/features/users/ssh_users.sh \
+    /opt/manage/features/users/xray_qac.sh \
+    /opt/manage/features/users/xray_users.sh \
+    /usr/local/lib/autoscript-setup/opt/setup/bin/badvpn-udpgw-launcher.sh \
+    /usr/local/lib/autoscript-setup/opt/setup/bin/sshws-control.py \
+    /usr/local/lib/autoscript-setup/opt/setup/install/management.sh
 do
-    [ -f "$f" ] || {
-        echo "ERROR: File runtime hilang: $f"
-        exit 1
-    }
+    [ -f "$f" ] || rollback 1
 done
 
+SUCCESS=1
+
 echo
-echo "PATCH BERHASIL DIPASANG."
+echo "=========================================="
+echo " UPDATE PATCH FIX BERHASIL"
+echo "=========================================="
 echo "Backup: $BACKUP"
+echo "Source dan runtime sudah diperbarui."
 echo "Akun pelanggan dan database tidak ditimpa."
-trap - EXIT
+echo "=========================================="
