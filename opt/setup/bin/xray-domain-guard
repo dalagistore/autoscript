@@ -1,0 +1,573 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+export PATH
+
+CONFIG_FILE="/etc/xray-domain-guard/config.env"
+CERT_FILE="/opt/cert/fullchain.pem"
+KEY_FILE="/opt/cert/privkey.pem"
+NGINX_CONF="/etc/nginx/conf.d/xray.conf"
+LOG_FILE="/var/log/xray-domain-guard/domain-guard.log"
+
+CERT_WARN_DAYS=14
+RENEW_BELOW_DAYS=7
+AUTO_RENEW=0
+ALLOW_CLOUDFLARE_PROXY_MISMATCH=1
+
+declare -a ISSUES=()
+CHECK_RESULT=0
+DOMAIN_VALUE="-"
+VPS_IP_VALUE="0.0.0.0"
+CERT_DAYS_VALUE="unknown"
+
+bool_is_true() {
+  local v="${1:-}"
+  v="$(echo "${v}" | tr '[:upper:]' '[:lower:]')"
+  [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "on" || "${v}" == "y" ]]
+}
+
+safe_int() {
+  local raw="${1:-}" fallback="${2:-0}"
+  if [[ "${raw}" =~ ^-?[0-9]+$ ]]; then
+    echo "${raw}"
+  else
+    echo "${fallback}"
+  fi
+}
+
+is_valid_ip() {
+  local ip="${1:-}"
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "${ip}" <<'PY' >/dev/null 2>&1
+import ipaddress
+import sys
+
+try:
+  ipaddress.ip_address(sys.argv[1])
+except Exception:
+  raise SystemExit(1)
+raise SystemExit(0)
+PY
+}
+
+is_public_ip() {
+  local ip="${1:-}"
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "${ip}" <<'PY' >/dev/null 2>&1
+import ipaddress
+import sys
+
+try:
+  addr = ipaddress.ip_address(sys.argv[1])
+except Exception:
+  raise SystemExit(1)
+
+if (
+  addr.is_private or
+  addr.is_loopback or
+  addr.is_link_local or
+  addr.is_multicast or
+  addr.is_unspecified or
+  addr.is_reserved
+):
+  raise SystemExit(1)
+
+raise SystemExit(0)
+PY
+}
+
+is_cloudflare_ip() {
+  local ip="${1:-}"
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - "${ip}" <<'PY' >/dev/null 2>&1
+import ipaddress
+import sys
+
+ip = sys.argv[1]
+cf_ranges = (
+  "173.245.48.0/20",
+  "103.21.244.0/22",
+  "103.22.200.0/22",
+  "103.31.4.0/22",
+  "141.101.64.0/18",
+  "108.162.192.0/18",
+  "190.93.240.0/20",
+  "188.114.96.0/20",
+  "197.234.240.0/22",
+  "198.41.128.0/17",
+  "162.158.0.0/15",
+  "104.16.0.0/13",
+  "104.24.0.0/14",
+  "172.64.0.0/13",
+  "131.0.72.0/22",
+  "2400:cb00::/32",
+  "2606:4700::/32",
+  "2803:f800::/32",
+  "2405:b500::/32",
+  "2405:8100::/32",
+  "2a06:98c0::/29",
+  "2c0f:f248::/32",
+)
+
+try:
+  addr = ipaddress.ip_address(ip)
+except Exception:
+  raise SystemExit(1)
+
+for cidr in cf_ranges:
+  if addr in ipaddress.ip_network(cidr):
+    raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+all_dns_ips_are_cloudflare() {
+  [[ "$#" -gt 0 ]] || return 1
+  local ip
+  for ip in "$@"; do
+    if ! is_cloudflare_ip "${ip}"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+svc_exists() {
+  local svc="$1"
+  local load
+  load="$(systemctl show -p LoadState --value "${svc}" 2>/dev/null || true)"
+  [[ -n "${load}" && "${load}" != "not-found" ]]
+}
+
+edge_runtime_get_env() {
+  local key="$1"
+  [[ -r "/etc/default/edge-runtime" ]] || return 1
+  awk -F= -v key="${key}" '
+    $1 == key {
+      sub(/^[[:space:]]+/, "", $2)
+      sub(/[[:space:]]+$/, "", $2)
+      print $2
+      exit
+    }
+  ' /etc/default/edge-runtime
+}
+
+edge_runtime_service_name() {
+  local provider
+  provider="$(edge_runtime_get_env EDGE_PROVIDER 2>/dev/null || echo "none")"
+  case "${provider}" in
+    nginx-stream) printf '%s\n' "nginx" ;;
+    go) printf '%s\n' "edge-mux.service" ;;
+    *) return 1 ;;
+  esac
+}
+
+edge_runtime_enabled_for_http80() {
+  local provider active http_port
+  provider="$(edge_runtime_get_env EDGE_PROVIDER 2>/dev/null || echo "none")"
+  active="$(edge_runtime_get_env EDGE_ACTIVATE_RUNTIME 2>/dev/null || echo "false")"
+  http_port="$(edge_runtime_get_env EDGE_PUBLIC_HTTP_PORT 2>/dev/null || echo "80")"
+  [[ "${provider}" != "none" ]] || return 1
+  case "${active}" in
+    1|true|TRUE|yes|YES|on|ON) ;;
+    *) return 1 ;;
+  esac
+  [[ "${http_port}" == "80" ]]
+}
+
+collect_conflicting_services() {
+  local svc edge_svc=""
+  for svc in nginx apache2 caddy lighttpd; do
+    if systemctl is-active --quiet "${svc}" >/dev/null 2>&1; then
+      printf '%s\n' "${svc}"
+    fi
+  done
+  if edge_runtime_enabled_for_http80; then
+    edge_svc="$(edge_runtime_service_name 2>/dev/null || true)"
+    if [[ -n "${edge_svc}" && "${edge_svc}" != "nginx" ]] && systemctl is-active --quiet "${edge_svc}" >/dev/null 2>&1; then
+      printf '%s\n' "${edge_svc}"
+    fi
+  fi
+}
+
+stop_service_list() {
+  local svc
+  for svc in "$@"; do
+    [[ -n "${svc}" ]] || continue
+    systemctl stop "${svc}" >/dev/null 2>&1 || true
+  done
+}
+
+restore_service_list() {
+  local svc
+  for svc in "$@"; do
+    [[ -n "${svc}" ]] || continue
+    if svc_exists "${svc}"; then
+      systemctl start "${svc}" >/dev/null 2>&1 || return 1
+    fi
+  done
+  return 0
+}
+
+restore_service_list_excluding_nginx() {
+  local svc
+  for svc in "$@"; do
+    [[ "${svc}" == "nginx" ]] && continue
+    if ! restore_service_list "${svc}"; then
+      return 1
+    fi
+  done
+  return 0
+}
+
+restart_active_tls_consumers() {
+  local edge_svc=""
+  if svc_exists sshws-stunnel && systemctl is-active --quiet sshws-stunnel >/dev/null 2>&1; then
+    systemctl restart sshws-stunnel >/dev/null 2>&1 || return 1
+    systemctl is-active --quiet sshws-stunnel >/dev/null 2>&1 || return 1
+  fi
+  edge_svc="$(edge_runtime_service_name 2>/dev/null || true)"
+  if [[ -n "${edge_svc}" && "${edge_svc}" != "nginx" ]] && svc_exists "${edge_svc}" && systemctl is-active --quiet "${edge_svc}" >/dev/null 2>&1; then
+    if systemctl reload "${edge_svc}" >/dev/null 2>&1; then
+      :
+    else
+      systemctl restart "${edge_svc}" >/dev/null 2>&1 || return 1
+    fi
+    systemctl is-active --quiet "${edge_svc}" >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
+load_config() {
+  if [[ -f "${CONFIG_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    . "${CONFIG_FILE}"
+  fi
+  CERT_WARN_DAYS="$(safe_int "${CERT_WARN_DAYS:-14}" 14)"
+  RENEW_BELOW_DAYS="$(safe_int "${RENEW_BELOW_DAYS:-7}" 7)"
+  AUTO_RENEW="$(safe_int "${AUTO_RENEW:-0}" 0)"
+  if bool_is_true "${ALLOW_CLOUDFLARE_PROXY_MISMATCH:-1}"; then
+    ALLOW_CLOUDFLARE_PROXY_MISMATCH=1
+  else
+    ALLOW_CLOUDFLARE_PROXY_MISMATCH=0
+  fi
+  if (( CERT_WARN_DAYS < 1 )); then
+    CERT_WARN_DAYS=14
+  fi
+  if (( RENEW_BELOW_DAYS < 1 )); then
+    RENEW_BELOW_DAYS=7
+  fi
+}
+
+detect_domain() {
+  local dom=""
+  if [[ -s "/etc/xray/domain" ]]; then
+    dom="$(head -n1 /etc/xray/domain 2>/dev/null | tr -d '\r' | awk '{print $1}' | tr -d ';' || true)"
+  fi
+  if [[ -z "${dom}" && -f "${NGINX_CONF}" ]]; then
+    dom="$(grep -E '^[[:space:]]*server_name[[:space:]]+' "${NGINX_CONF}" 2>/dev/null | head -n1 | sed -E 's/^[[:space:]]*server_name[[:space:]]+//; s/;.*$//' | awk '{print $1}' | tr -d ';' || true)"
+  fi
+  echo "${dom}"
+}
+
+detect_vps_ip() {
+  local ip=""
+  if command -v curl >/dev/null 2>&1; then
+    ip="$(curl -4fsSL --connect-timeout 3 --max-time 5 https://api.ipify.org 2>/dev/null || true)"
+    [[ -n "${ip}" ]] || ip="$(curl -6fsSL --connect-timeout 3 --max-time 5 https://api64.ipify.org 2>/dev/null || true)"
+  fi
+  if command -v ip >/dev/null 2>&1; then
+    [[ -n "${ip}" ]] || ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}' || true)"
+    [[ -n "${ip}" ]] || ip="$(ip -6 route get 2606:4700:4700::1111 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src"){print $(i+1); exit}}' || true)"
+  fi
+  if [[ -z "${ip}" ]]; then
+    ip="$(hostname -I 2>/dev/null | tr ' ' '\n' | awk 'NF {print; exit}' || true)"
+  fi
+  if ! is_valid_ip "${ip}"; then
+    ip="0.0.0.0"
+  fi
+  echo "${ip:-0.0.0.0}"
+}
+
+cert_days_left() {
+  if [[ ! -s "${CERT_FILE}" ]]; then
+    echo ""
+    return 0
+  fi
+  local end end_ts now_ts
+  end="$(openssl x509 -in "${CERT_FILE}" -noout -enddate 2>/dev/null | sed -e 's/^notAfter=//' || true)"
+  [[ -n "${end}" ]] || { echo ""; return 0; }
+  end_ts="$(date -d "${end}" +%s 2>/dev/null || true)"
+  now_ts="$(date +%s 2>/dev/null || true)"
+  [[ -n "${end_ts}" && -n "${now_ts}" ]] || { echo ""; return 0; }
+  echo $(( (end_ts - now_ts) / 86400 ))
+}
+
+acme_sh_path_get() {
+  if [[ -x "/root/.acme.sh/acme.sh" ]]; then
+    echo "/root/.acme.sh/acme.sh"
+    return 0
+  fi
+  if command -v acme.sh >/dev/null 2>&1; then
+    command -v acme.sh
+    return 0
+  fi
+  echo ""
+}
+
+append_log() {
+  mkdir -p "$(dirname "${LOG_FILE}")"
+  printf '[%s] %s\n' "$(date -u +'%Y-%m-%d %H:%M')" "$*" >> "${LOG_FILE}"
+  chmod 600 "${LOG_FILE}" || true
+}
+
+add_issue() {
+  local msg="$1"
+  local sev="${2:-warn}"
+  ISSUES+=("${sev^^}: ${msg}")
+  if [[ "${sev}" == "critical" ]]; then
+    CHECK_RESULT=2
+  elif (( CHECK_RESULT < 1 )); then
+    CHECK_RESULT=1
+  fi
+}
+
+cert_matches_domain() {
+  local domain="$1"
+  [[ -n "${domain}" && -s "${CERT_FILE}" ]] || return 1
+  local san
+  san="$(openssl x509 -in "${CERT_FILE}" -noout -ext subjectAltName 2>/dev/null || true)"
+  [[ -n "${san}" ]] || return 1
+  if echo "${san}" | grep -Fq "DNS:${domain}"; then
+    return 0
+  fi
+  if echo "${san}" | grep -Fq "DNS:*.${domain}"; then
+    return 0
+  fi
+  local wildcard=""
+  if [[ "${domain}" == *.* ]]; then
+    wildcard="*.${domain#*.}"
+    if echo "${san}" | grep -Fq "DNS:${wildcard}"; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+run_check() {
+  CHECK_RESULT=0
+  ISSUES=()
+  DOMAIN_VALUE="$(detect_domain)"
+  [[ -n "${DOMAIN_VALUE}" ]] || DOMAIN_VALUE="-"
+  VPS_IP_VALUE="$(detect_vps_ip)"
+  [[ -n "${VPS_IP_VALUE}" ]] || VPS_IP_VALUE="0.0.0.0"
+
+  if [[ ! -s "${CERT_FILE}" || ! -s "${KEY_FILE}" ]]; then
+    add_issue "File cert/key TLS belum lengkap di /opt/cert" "critical"
+  fi
+
+  local cert_days
+  cert_days="$(cert_days_left)"
+  CERT_DAYS_VALUE="${cert_days:-unknown}"
+  if [[ -z "${cert_days}" ]]; then
+    add_issue "Gagal membaca masa berlaku cert TLS" "critical"
+  elif (( cert_days < 0 )); then
+    add_issue "Cert TLS sudah expired (${cert_days} hari)" "critical"
+  elif (( cert_days <= CERT_WARN_DAYS )); then
+    add_issue "Cert TLS mendekati expired (${cert_days} hari)" "warn"
+  fi
+
+  if [[ "${DOMAIN_VALUE}" == "-" || "${DOMAIN_VALUE}" != *.* ]]; then
+    add_issue "Domain aktif belum valid (${DOMAIN_VALUE})" "warn"
+  else
+    if ! cert_matches_domain "${DOMAIN_VALUE}"; then
+      add_issue "SAN cert tidak memuat domain aktif ${DOMAIN_VALUE}" "warn"
+    fi
+    local -a dns_ips=()
+    if command -v getent >/dev/null 2>&1; then
+      mapfile -t dns_ips < <(getent ahosts "${DOMAIN_VALUE}" 2>/dev/null | awk '{print $1}' | sort -u || true)
+      if (( ${#dns_ips[@]} == 0 )); then
+        mapfile -t dns_ips < <(getent hosts "${DOMAIN_VALUE}" 2>/dev/null | awk '{print $1}' | sort -u || true)
+      fi
+    fi
+    if (( ${#dns_ips[@]} == 0 )); then
+      add_issue "DNS A/AAAA ${DOMAIN_VALUE} tidak ter-resolve" "warn"
+    elif is_public_ip "${VPS_IP_VALUE}"; then
+      local matched="0" dip
+      for dip in "${dns_ips[@]}"; do
+        if [[ "${dip}" == "${VPS_IP_VALUE}" ]]; then
+          matched="1"
+          break
+        fi
+      done
+      if [[ "${matched}" != "1" ]]; then
+        if (( ALLOW_CLOUDFLARE_PROXY_MISMATCH == 1 )) && all_dns_ips_are_cloudflare "${dns_ips[@]}"; then
+          :
+        else
+          add_issue "DNS ${DOMAIN_VALUE} tidak match IP VPS ${VPS_IP_VALUE} (mungkin proxied/CDN)" "warn"
+        fi
+      fi
+    fi
+  fi
+
+  if ! systemctl is-active --quiet nginx >/dev/null 2>&1; then
+    add_issue "nginx service tidak active" "critical"
+  fi
+
+  append_log "check domain=${DOMAIN_VALUE} ip=${VPS_IP_VALUE} cert_days=${CERT_DAYS_VALUE} result=${CHECK_RESULT}"
+}
+
+renew_if_needed() {
+  local force_mode="${1:-0}"
+  local cert_days
+  local renew_ok="0"
+  local port80_conflict="0"
+  local renew_log
+  local -a stopped_services=()
+  cert_days="$(cert_days_left)"
+  if [[ -z "${cert_days}" ]]; then
+    cert_days=0
+  fi
+
+  if (( force_mode != 1 && cert_days > RENEW_BELOW_DAYS )); then
+    append_log "renew skipped cert_days=${cert_days} threshold=${RENEW_BELOW_DAYS}"
+    return 0
+  fi
+
+  if (( AUTO_RENEW != 1 && force_mode != 1 )); then
+    append_log "renew skipped AUTO_RENEW=0"
+    return 0
+  fi
+
+  local domain acme
+  domain="$(detect_domain)"
+  if [[ -z "${domain}" ]]; then
+    append_log "renew failed domain empty"
+    return 1
+  fi
+
+  acme="$(acme_sh_path_get)"
+  if [[ -z "${acme}" ]]; then
+    append_log "renew failed acme.sh missing"
+    return 1
+  fi
+
+  export PATH="/root/.acme.sh:${PATH}"
+  renew_log="$(mktemp)" || return 1
+  if "${acme}" --renew -d "${domain}" --force >"${renew_log}" 2>&1; then
+    renew_ok="1"
+  else
+    if grep -Eqi "port 80 is already used|Please stop it first" "${renew_log}"; then
+      port80_conflict="1"
+    fi
+    if "${acme}" --cron --force >>"${renew_log}" 2>&1; then
+      renew_ok="1"
+    elif grep -Eqi "port 80 is already used|Please stop it first" "${renew_log}"; then
+      port80_conflict="1"
+    fi
+  fi
+
+  if [[ "${renew_ok}" != "1" && "${port80_conflict}" == "1" ]]; then
+    mapfile -t stopped_services < <(collect_conflicting_services | awk 'NF && !seen[$0]++')
+    if (( ${#stopped_services[@]} > 0 )); then
+      stop_service_list "${stopped_services[@]}"
+    fi
+    if "${acme}" --renew -d "${domain}" --force >"${renew_log}" 2>&1; then
+      renew_ok="1"
+    fi
+  fi
+  rm -f "${renew_log}" >/dev/null 2>&1 || true
+
+  if [[ "${renew_ok}" != "1" ]]; then
+    restore_service_list "${stopped_services[@]}" >/dev/null 2>&1 || true
+    append_log "renew command failed domain=${domain}"
+    return 1
+  fi
+
+  if ! "${acme}" --install-cert -d "${domain}" \
+    --key-file "${KEY_FILE}" \
+    --fullchain-file "${CERT_FILE}" \
+    --reloadcmd "/bin/true" >/dev/null 2>&1; then
+    restore_service_list "${stopped_services[@]}" >/dev/null 2>&1 || true
+    append_log "install-cert failed domain=${domain}"
+    return 1
+  fi
+
+  if ! nginx -t >/dev/null 2>&1; then
+    restore_service_list "${stopped_services[@]}" >/dev/null 2>&1 || true
+    append_log "nginx config invalid after install-cert domain=${domain}"
+    return 1
+  fi
+  if ! systemctl restart nginx >/dev/null 2>&1; then
+    restore_service_list "${stopped_services[@]}" >/dev/null 2>&1 || true
+    append_log "nginx restart failed after install-cert domain=${domain}"
+    return 1
+  fi
+  if ! restart_active_tls_consumers; then
+    restore_service_list "${stopped_services[@]}" >/dev/null 2>&1 || true
+    append_log "tls consumer restart failed after install-cert domain=${domain}"
+    return 1
+  fi
+  if ! restore_service_list_excluding_nginx "${stopped_services[@]}"; then
+    append_log "restore stopped services failed after renew domain=${domain}"
+    return 1
+  fi
+
+  append_log "renew success domain=${domain}"
+  return 0
+}
+
+print_summary() {
+  echo "xray-domain-guard"
+  echo "  domain     : ${DOMAIN_VALUE}"
+  echo "  vps_ip     : ${VPS_IP_VALUE}"
+  echo "  cert_days  : ${CERT_DAYS_VALUE}"
+  echo "  result     : ${CHECK_RESULT}"
+  if (( ${#ISSUES[@]} > 0 )); then
+    local it
+    for it in "${ISSUES[@]}"; do
+      echo "  - ${it}"
+    done
+  fi
+}
+
+show_status() {
+  if [[ -s "${LOG_FILE}" ]]; then
+    tail -n 40 "${LOG_FILE}" || true
+  else
+    echo "Belum ada log domain guard."
+  fi
+}
+
+main() {
+  load_config
+  local cmd="${1:-check}"
+  case "${cmd}" in
+    check)
+      run_check
+      print_summary
+      return "${CHECK_RESULT}"
+      ;;
+    renew-if-needed)
+      local force_mode=0
+      if [[ "${2:-}" == "--force" ]]; then
+        force_mode=1
+      fi
+      renew_if_needed "${force_mode}" || true
+      run_check
+      print_summary
+      return "${CHECK_RESULT}"
+      ;;
+    status)
+      show_status
+      return 0
+      ;;
+    *)
+      echo "Usage: xray-domain-guard [check|renew-if-needed [--force]|status]" >&2
+      return 2
+      ;;
+  esac
+}
+
+main "$@"

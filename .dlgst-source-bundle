@@ -1,0 +1,2 @@
+DLGST XRAY PANEL source bundle.
+This marker makes run.sh use this extracted source tree without requiring .git metadata.

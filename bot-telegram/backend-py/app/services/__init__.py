@@ -1,0 +1,32 @@
+from . import (
+    menu_10_backup,
+    menu_1_status,
+    menu_2_xray_user,
+    menu_3_ssh_user,
+    menu_4_network,
+    menu_4_xray_quota,
+    menu_5_ssh_quota,
+    menu_6_ssh_network,
+)
+
+MENU_HANDLERS = {
+    "1": menu_1_status.handle,
+    "5": menu_4_network.handle,
+    "22": menu_2_xray_user.handle,
+    "23": menu_3_ssh_user.handle,
+    "24": menu_4_xray_quota.handle,
+    "25": menu_5_ssh_quota.handle,
+    "32": menu_10_backup.handle,
+    "33": menu_4_network.handle,
+    "34": menu_6_ssh_network.handle,
+    "37": menu_6_ssh_network.handle,
+    "40": menu_6_ssh_network.handle,
+    "46": menu_10_backup.handle,
+    "47": menu_10_backup.handle,
+    "48": menu_10_backup.handle,
+    "49": menu_10_backup.handle,
+    "50": menu_10_backup.handle,
+    "51": menu_10_backup.handle,
+    "52": menu_10_backup.handle,
+    "53": menu_10_backup.handle,
+}
