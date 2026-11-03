@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly DLGST WireGuard expiry check
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
