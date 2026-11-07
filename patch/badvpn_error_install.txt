@@ -1,0 +1,8 @@
+#jalankan script ini di vps server, setelah dijalan ulangi instalasi bash run.sh
+
+cd /root/autoscript
+chmod 755 opt/setup/bin/badvpn-udpgw-launcher.sh
+git update-index --chmod=+x opt/setup/bin/badvpn-udpgw-launcher.sh
+echo "===== VERIFIKASI ====="
+ls -l opt/setup/bin/badvpn-udpgw-launcher.sh
+git ls-files --stage opt/setup/bin/badvpn-udpgw-launcher.sh
